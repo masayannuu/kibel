@@ -1,5 +1,5 @@
 {
-  "repo_root": "/Users/masaya.morimoto/app/github.com/masayannuu/kibel",
+  "repo_root": ".",
   "working_directory": ".",
   "stop_on_failure": false,
   "timeout_sec": 1800,

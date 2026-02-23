@@ -2,6 +2,7 @@ use crate::error::KibelClientError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+#[cfg(any(test, feature = "test-hooks"))]
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -641,7 +642,8 @@ impl KibelClient {
                 "content is required".to_string(),
             ));
         }
-        if input.group_ids.is_empty() {
+        let group_ids = normalize_vec(&input.group_ids);
+        if group_ids.is_empty() {
             return Err(KibelClientError::InputInvalid(
                 "at least one group id is required".to_string(),
             ));
@@ -657,7 +659,7 @@ impl KibelClient {
             gql_input.insert("content".to_string(), Value::String(content.to_string()));
         }
         if schema.supports_input("groupIds") {
-            gql_input.insert("groupIds".to_string(), json!(input.group_ids));
+            gql_input.insert("groupIds".to_string(), json!(group_ids));
         }
         if schema.supports_input("coediting") {
             gql_input.insert("coediting".to_string(), Value::Bool(input.coediting));
@@ -1234,25 +1236,13 @@ impl KibelClient {
         ]));
         let payload_raw = payload.to_string();
 
-        if let Ok(path) = std::env::var("KIBEL_TEST_CAPTURE_REQUEST_PATH") {
-            let path = path.trim();
-            if !path.is_empty() {
-                fs::write(path, &payload_raw)
-                    .map_err(|err| KibelClientError::Transport(err.to_string()))?;
-            }
+        test_capture_request_payload(&payload_raw)?;
+
+        if let Some(message) = test_transport_error_message() {
+            return Err(KibelClientError::Transport(message));
         }
 
-        if let Ok(message) = std::env::var("KIBEL_TEST_TRANSPORT_ERROR") {
-            let message = message.trim();
-            if !message.is_empty() {
-                return Err(KibelClientError::Transport(message.to_string()));
-            }
-        }
-
-        if let Ok(fixture) = std::env::var("KIBEL_TEST_GRAPHQL_RESPONSE") {
-            let parsed = serde_json::from_str::<Value>(&fixture).map_err(|err| {
-                KibelClientError::Transport(format!("invalid test fixture JSON: {err}"))
-            })?;
+        if let Some(parsed) = load_graphql_response_fixture()? {
             if let Some((code, message)) = extract_graphql_error(&parsed) {
                 return Err(KibelClientError::Api { code, message });
             }
@@ -1477,6 +1467,61 @@ fn normalize_folder(folder: &CreateNoteFolderInput) -> Result<Value, KibelClient
     }))
 }
 
+#[cfg(any(test, feature = "test-hooks"))]
+fn test_capture_request_payload(payload_raw: &str) -> Result<(), KibelClientError> {
+    if let Ok(path) = std::env::var("KIBEL_TEST_CAPTURE_REQUEST_PATH") {
+        let path = path.trim();
+        if !path.is_empty() {
+            fs::write(path, payload_raw)
+                .map_err(|err| KibelClientError::Transport(err.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(any(test, feature = "test-hooks")))]
+fn test_capture_request_payload(_payload_raw: &str) -> Result<(), KibelClientError> {
+    Ok(())
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn test_transport_error_message() -> Option<String> {
+    std::env::var("KIBEL_TEST_TRANSPORT_ERROR")
+        .ok()
+        .map(|message| message.trim().to_string())
+        .filter(|message| !message.is_empty())
+}
+
+#[cfg(not(any(test, feature = "test-hooks")))]
+fn test_transport_error_message() -> Option<String> {
+    None
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn load_graphql_response_fixture() -> Result<Option<Value>, KibelClientError> {
+    let Some(fixture) = std::env::var("KIBEL_TEST_GRAPHQL_RESPONSE").ok() else {
+        return Ok(None);
+    };
+    let parsed = serde_json::from_str::<Value>(&fixture)
+        .map_err(|err| KibelClientError::Transport(format!("invalid test fixture JSON: {err}")))?;
+    Ok(Some(parsed))
+}
+
+#[cfg(not(any(test, feature = "test-hooks")))]
+fn load_graphql_response_fixture() -> Result<Option<Value>, KibelClientError> {
+    Ok(None)
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn fixture_response_env_set() -> bool {
+    std::env::var("KIBEL_TEST_GRAPHQL_RESPONSE").is_ok()
+}
+
+#[cfg(not(any(test, feature = "test-hooks")))]
+fn fixture_response_env_set() -> bool {
+    false
+}
+
 fn should_skip_runtime_introspection() -> bool {
     if let Ok(raw) = std::env::var("KIBEL_DISABLE_RUNTIME_INTROSPECTION") {
         let normalized = raw.trim().to_ascii_lowercase();
@@ -1484,9 +1529,10 @@ fn should_skip_runtime_introspection() -> bool {
             return true;
         }
     }
-    std::env::var("KIBEL_TEST_GRAPHQL_RESPONSE").is_ok()
+    fixture_response_env_set()
 }
 
+#[cfg(any(test, feature = "test-hooks"))]
 fn load_schema_fixture_from_env() -> Option<CreateNoteSchema> {
     let raw = std::env::var("KIBEL_TEST_CREATE_NOTE_SCHEMA_RESPONSE").ok()?;
     let trimmed = raw.trim();
@@ -1495,6 +1541,11 @@ fn load_schema_fixture_from_env() -> Option<CreateNoteSchema> {
     }
     let payload = serde_json::from_str::<Value>(trimmed).ok()?;
     CreateNoteSchema::from_introspection(&payload)
+}
+
+#[cfg(not(any(test, feature = "test-hooks")))]
+fn load_schema_fixture_from_env() -> Option<CreateNoteSchema> {
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -1611,9 +1662,10 @@ mod tests {
         collect_name_set, endpoint_from_origin, extract_graphql_error,
         load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
         resource_contract_version, resource_contracts, should_skip_runtime_introspection,
-        CreateNoteSchema,
+        CreateNoteInput, CreateNoteSchema, KibelClient,
     };
     use serde_json::json;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn endpoint_keeps_api_path_when_present() {
@@ -1787,5 +1839,61 @@ mod tests {
             .iter()
             .all(|item| item.graphql_file.starts_with("endpoint:")));
         assert_eq!(resource_contract_upstream_commit(), "");
+    }
+
+    #[test]
+    fn create_note_rejects_blank_group_ids() {
+        let client = KibelClient::new("https://example.kibe.la", "test-token")
+            .expect("client should be created");
+        let error = client
+            .create_note(&CreateNoteInput {
+                title: "Title".to_string(),
+                content: "Content".to_string(),
+                group_ids: vec!["   ".to_string()],
+                draft: None,
+                coediting: false,
+                folders: vec![],
+                author_id: None,
+                published_at: None,
+                client_mutation_id: None,
+            })
+            .expect_err("blank group id should be rejected");
+        match error {
+            super::KibelClientError::InputInvalid(message) => {
+                assert_eq!(message, "at least one group id is required");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_note_normalizes_group_ids_before_request() {
+        let capture = NamedTempFile::new().expect("capture temp file should be created");
+        let capture_path = capture.path().to_string_lossy().to_string();
+        std::env::set_var("KIBEL_TEST_CAPTURE_REQUEST_PATH", &capture_path);
+
+        let client =
+            KibelClient::new("http://127.0.0.1:9", "test-token").expect("client should be created");
+        let _ = client.create_note(&CreateNoteInput {
+            title: "Title".to_string(),
+            content: "Content".to_string(),
+            group_ids: vec![" G1 ".to_string(), " ".to_string(), "G2".to_string()],
+            draft: None,
+            coediting: false,
+            folders: vec![],
+            author_id: None,
+            published_at: None,
+            client_mutation_id: None,
+        });
+
+        let payload =
+            std::fs::read_to_string(&capture_path).expect("captured payload should exist");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("captured payload should be valid json");
+        assert_eq!(
+            parsed["variables"]["input"]["groupIds"],
+            json!(["G1", "G2"])
+        );
+        std::env::remove_var("KIBEL_TEST_CAPTURE_REQUEST_PATH");
     }
 }

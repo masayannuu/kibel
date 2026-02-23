@@ -16,7 +16,7 @@ jobs:
 
       - name: Setup Rust
         run: |
-          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy
           rustup default 1.89.0
 
       - name: Validate project quality gates

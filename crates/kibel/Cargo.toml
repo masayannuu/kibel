@@ -20,4 +20,5 @@ serde_json.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2.0"
+kibel-client = { version = "0.1.0", path = "../kibel-client", features = ["test-hooks"] }
 pretty_assertions = "1.4"
