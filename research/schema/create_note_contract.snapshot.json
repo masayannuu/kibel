@@ -1,0 +1,38 @@
+{
+  "schema_contract_version": 1,
+  "captured_at": "2026-02-23T06:21:53Z",
+  "source": {
+    "origin": "https://spikestudio.kibe.la",
+    "artifact": "artifacts/schema-live/create-note-schema-detail-20260223T062153Z.json"
+  },
+  "create_note_input_fields": [
+    "clientMutationId",
+    "title",
+    "content",
+    "draft",
+    "coediting",
+    "groupIds",
+    "folders",
+    "authorId",
+    "publishedAt"
+  ],
+  "create_note_payload_fields": [
+    "clientMutationId",
+    "note"
+  ],
+  "create_note_note_projection_fields": [
+    "id",
+    "title",
+    "content",
+    "url"
+  ],
+  "required_input_fields": [
+    "title",
+    "content",
+    "groupIds",
+    "coediting"
+  ],
+  "required_payload_fields": [
+    "note"
+  ]
+}
