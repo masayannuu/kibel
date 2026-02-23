@@ -1,0 +1,60 @@
+{
+  "repo_root": "/Users/masaya.morimoto/app/github.com/masayannuu/kibel",
+  "working_directory": ".",
+  "stop_on_failure": false,
+  "timeout_sec": 1800,
+  "baseline_targets": [
+    {
+      "id": "red-no-unsafe-in-prod-source",
+      "command": "if rg -n --glob '*.rs' '\\bunsafe\\b' crates/kibel/src crates/kibel-client/src crates/kibel-tools/src; then echo 'unexpected unsafe keyword in production source'; exit 1; else echo 'no unsafe keyword in production source'; fi"
+    },
+    {
+      "id": "red-no-runtime-process-exec-in-cli-client",
+      "command": "if rg -n 'std::process::Command|Command::new\\(' crates/kibel/src crates/kibel-client/src; then echo 'runtime process execution surface detected'; exit 1; else echo 'no runtime process execution in CLI/client'; fi"
+    },
+    {
+      "id": "red-no-obvious-credential-patterns",
+      "command": "if rg -n -g '!target/**' -g '!.git/**' -g '!.agent/security/runs/**' -e 'AKIA[0-9A-Z]{16}' -e '-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----' -e 'xox[baprs]-[A-Za-z0-9-]+' -e 'gh[pousr]_[A-Za-z0-9_]+' .; then echo 'potential credential material detected'; exit 1; else echo 'no obvious credential patterns'; fi"
+    },
+    {
+      "id": "blue-token-redaction-regression",
+      "command": "cargo test -p kibel --test e2e_stub_transport config_set_team_and_profiles_are_machine_readable_without_token_leak -- --exact"
+    },
+    {
+      "id": "blue-auth-precedence-regression",
+      "command": "cargo test -p kibel-client auth::tests -- --nocapture"
+    },
+    {
+      "id": "blue-graphql-error-mapping-regression",
+      "command": "cargo test -p kibel error::tests::graphql_error_mapping_is_stable -- --exact"
+    },
+    {
+      "id": "blue-quality-clippy-deny-warnings",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings"
+    },
+    {
+      "id": "blue-contract-create-note-check",
+      "command": "cargo run -p kibel-tools -- create-note-contract check"
+    },
+    {
+      "id": "blue-contract-resource-check",
+      "command": "cargo run -p kibel-tools -- resource-contract check"
+    },
+    {
+      "id": "blue-quality-fmt-check",
+      "command": "cargo fmt --all --check"
+    },
+    {
+      "id": "blue-quality-workspace-tests",
+      "command": "cargo test --workspace"
+    },
+    {
+      "id": "red-supply-chain-cargo-audit",
+      "command": "cargo audit --deny warnings --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0384"
+    },
+    {
+      "id": "blue-quality-package-kibel-client",
+      "command": "if git rev-parse --verify HEAD >/dev/null 2>&1; then cargo package --locked -p kibel-client; else echo 'skip cargo package check: no HEAD yet'; fi"
+    }
+  ]
+}

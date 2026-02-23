@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+
+      - name: Validate project quality gates
+        run: |
+          cargo run -p kibel-tools -- create-note-contract check
+          cargo run -p kibel-tools -- resource-contract check
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Verify package manifests
+        run: |
+          cargo package --locked -p kibel-client
+
+      - name: Build release binary
+        run: cargo build --release -p kibel
+
+      - name: Bundle release artifact
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ARCHIVE="kibel-${VERSION}-linux-x86_64.tar.gz"
+          tar -C target/release -czf "${ARCHIVE}" kibel
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kibel-${{ github.ref_name }}-linux-x86_64
+          path: |
+            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz
+            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
