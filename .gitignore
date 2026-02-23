@@ -1,0 +1,8 @@
+/target/
+**/target/
+.DS_Store
+.agent/execplans/
+.agent/security/runs/
+artifacts/
+mise.local.toml
+mise.*.local.toml
