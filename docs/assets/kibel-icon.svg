@@ -1,0 +1,19 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kibel app icon">
+  <defs>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgb(60, 121, 201)" />
+      <stop offset="100%" stop-color="rgb(40, 101, 181)" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-opacity="0.15" />
+    </filter>
+  </defs>
+
+  <rect width="256" height="256" rx="60" fill="url(#brandGrad)" />
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="48" width="128" height="160" rx="16" stroke="white" stroke-width="18" fill="none" />
+    <path d="M 94 104 L 124 128 L 94 152" stroke="white" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <line x1="136" y1="160" x2="162" y2="160" stroke="white" stroke-width="18" stroke-linecap="round" />
+  </g>
+</svg>
