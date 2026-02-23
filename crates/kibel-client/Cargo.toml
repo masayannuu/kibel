@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["kibela", "graphql", "client"]
 categories = ["api-bindings"]
 
+[features]
+default = []
+test-hooks = []
+
 [dependencies]
 directories.workspace = true
 keyring.workspace = true

@@ -4,24 +4,24 @@
 
 Build and maintain a production-grade Kibela CLI + reusable Rust client library.
 
-## Source of truth (absolute paths)
+## Source of truth
 
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/README.md
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/docs/implementation-policy.md
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/docs/architecture.md
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/docs/schema-lifecycle.md
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/docs/maintenance.md
+- README.md
+- docs/implementation-policy.md
+- docs/architecture.md
+- docs/schema-lifecycle.md
+- docs/maintenance.md
 
 Schema contracts:
 
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/research/schema/create_note_contract.snapshot.json
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/research/schema/resource_contracts.endpoint.snapshot.json
-- /Users/masaya.morimoto/app/github.com/masayannuu/kibel/research/schema/resource_contracts.snapshot.json
+- research/schema/create_note_contract.snapshot.json
+- research/schema/resource_contracts.endpoint.snapshot.json
+- research/schema/resource_contracts.snapshot.json
 
 Primary external reference for behavior consistency:
 
-- /Users/masaya.morimoto/app/github.com/oss/kibela-mcp-server/src/lib/kibela.ts
-- /Users/masaya.morimoto/app/github.com/oss/kibela-mcp-server/src/lib/schemas.ts
+- https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/kibela.ts
+- https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/schemas.ts
 
 ## Execution loop
 
