@@ -19,6 +19,13 @@ Kibela operations are often needed in scripts, CI, and internal tooling.
 - shared behavior between CLI and library,
 - deterministic schema drift detection with committed snapshots.
 
+## Official Interfaces
+
+Treat the following as canonical for automation integrations:
+
+- `docs/cli-interface.md`: official CLI/API contract (`--json`, errors, exit codes, safety boundary).
+- `docs/agent-skills.md`: official agent workflows for high-precision retrieval and RAG.
+
 ## Quick Start (CLI)
 
 ### 1. Install (recommended: GitHub Release binary)
@@ -45,7 +52,17 @@ sudo install -m 0755 kibel /usr/local/bin/kibel
 kibel --version
 ```
 
-### 2. Fallback install from source (Cargo)
+### 2. Install via Homebrew
+
+```bash
+brew install masayannuu/tap/kibel
+```
+
+Note:
+- Homebrew distribution is provided via `masayannuu/homebrew-tap`.
+- Public repo visibility is required for unauthenticated users to fetch release assets.
+
+### 3. Fallback install from source (Cargo)
 
 ```bash
 # install from source checkout
@@ -56,24 +73,52 @@ cargo build --release -p kibel
 ./target/release/kibel --help
 ```
 
-### 3. Set environment
+### 4. Set environment
 
 ```bash
 export KIBELA_ORIGIN="https://my-team.kibe.la"
 export KIBELA_TEAM="my-team"
+# optional aliases:
+export KIBELA_TENANT="my-team"
+export KIBELA_TENANT_ORIGIN="https://my-team.kibe.la"
 export KIBELA_ACCESS_TOKEN="<your-token>"
 ```
 
-### 4. Run commands
+### 5. Run commands
 
 ```bash
 kibel --json auth status
 kibel --json search note --query onboarding --first 16
+kibel --json search note --mine --first 10
 kibel --json note get --id N1
 kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
+`search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
+
 `graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
+
+## Official Agent Skills
+
+This repo ships official skills under `skills/`:
+
+- `skills/kibel-agentic-search`
+- `skills/kibel-agentic-rag`
+- `skills/kibel-cli-operator`
+
+Install (Codex):
+
+```bash
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
+  --repo masayannuu/kibel \
+  --path skills/kibel-agentic-search \
+  --path skills/kibel-agentic-rag \
+  --path skills/kibel-cli-operator
+```
+
+Then restart Codex.  
+For Claude Code, use the same `SKILL.md` files directly as execution playbooks.
+Skills are distribution-first: they assume `kibel` is installed in `PATH` (or override with `KIBEL_BIN`).
 
 ## Auth And Config Behavior
 
@@ -86,8 +131,15 @@ Token resolution order is fixed:
 
 Origin and team resolution:
 
-1. Team: `--team` / `KIBELA_TEAM` -> `config.default_team`
-2. Origin: `--origin` / `KIBELA_ORIGIN` -> team profile origin
+1. Team: `--team` (alias: `--tenant`) / `KIBELA_TEAM` (alias: `KIBELA_TENANT`) -> `config.default_team`
+2. Origin: `--origin` / `KIBELA_ORIGIN` (alias: `KIBELA_TENANT_ORIGIN`) -> team profile origin
+
+`auth login` notes:
+
+- Missing fields are prompted interactively on TTY (origin/team/token).
+- Token storage is tenant-origin aware in keychain, with legacy team fallback for compatibility.
+- Config profile also stores token/origin so server environments can run without keychain.
+- Token settings URL shown in login result: `<origin>/settings/access_tokens` (example: `https://example.kibe.la/settings/access_tokens`)
 
 If origin cannot be resolved, commands fail with `INPUT_INVALID`.
 
@@ -147,6 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         coediting: None,
         updated: None,
         group_ids: vec![],
+        user_ids: vec![],
         folder_ids: vec![],
         liker_ids: vec![],
         is_archived: None,
@@ -185,9 +238,12 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ## Project Docs
 
 - `docs/implementation-policy.md`
+- `docs/cli-interface.md`
+- `docs/agent-skills.md`
 - `docs/architecture.md`
 - `docs/schema-lifecycle.md`
 - `docs/maintenance.md`
+- `skills/README.md`
 
 ## OSS Metadata
 
