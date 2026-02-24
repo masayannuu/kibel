@@ -195,3 +195,70 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         client_method: "update_note",
     },
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TrustedOperation {
+    SearchNote,
+    SearchFolder,
+    GetGroups,
+    GetFolders,
+    GetNotes,
+    GetNote,
+    GetNoteFromPath,
+    GetFolder,
+    GetFolderFromPath,
+    GetFeedSections,
+    CreateNote,
+    CreateComment,
+    CreateCommentReply,
+    CreateFolder,
+    MoveNoteToAnotherFolder,
+    AttachNoteToFolder,
+    UpdateNoteContent,
+}
+
+pub const TRUSTED_OPERATIONS: &[TrustedOperation] = &[
+    TrustedOperation::SearchNote,
+    TrustedOperation::SearchFolder,
+    TrustedOperation::GetGroups,
+    TrustedOperation::GetFolders,
+    TrustedOperation::GetNotes,
+    TrustedOperation::GetNote,
+    TrustedOperation::GetNoteFromPath,
+    TrustedOperation::GetFolder,
+    TrustedOperation::GetFolderFromPath,
+    TrustedOperation::GetFeedSections,
+    TrustedOperation::CreateNote,
+    TrustedOperation::CreateComment,
+    TrustedOperation::CreateCommentReply,
+    TrustedOperation::CreateFolder,
+    TrustedOperation::MoveNoteToAnotherFolder,
+    TrustedOperation::AttachNoteToFolder,
+    TrustedOperation::UpdateNoteContent,
+];
+
+pub const fn trusted_operation_contract_index(operation: TrustedOperation) -> usize {
+    match operation {
+        TrustedOperation::SearchNote => 0,
+        TrustedOperation::SearchFolder => 1,
+        TrustedOperation::GetGroups => 2,
+        TrustedOperation::GetFolders => 3,
+        TrustedOperation::GetNotes => 4,
+        TrustedOperation::GetNote => 5,
+        TrustedOperation::GetNoteFromPath => 6,
+        TrustedOperation::GetFolder => 7,
+        TrustedOperation::GetFolderFromPath => 8,
+        TrustedOperation::GetFeedSections => 9,
+        TrustedOperation::CreateNote => 10,
+        TrustedOperation::CreateComment => 11,
+        TrustedOperation::CreateCommentReply => 12,
+        TrustedOperation::CreateFolder => 13,
+        TrustedOperation::MoveNoteToAnotherFolder => 14,
+        TrustedOperation::AttachNoteToFolder => 15,
+        TrustedOperation::UpdateNoteContent => 16,
+    }
+}
+
+pub fn trusted_operation_contract(operation: TrustedOperation) -> &'static ResourceContract {
+    &RESOURCE_CONTRACTS[trusted_operation_contract_index(operation)]
+}

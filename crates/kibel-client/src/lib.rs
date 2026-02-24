@@ -10,10 +10,11 @@ pub use auth::{
 };
 pub use client::{
     resource_contract_upstream_commit, resource_contract_version, resource_contracts,
-    AttachNoteToFolderInput, CreateCommentInput, CreateCommentReplyInput, CreateFolderInput,
-    CreateNoteFolderInput, CreateNoteInput, CreateNoteResult, FeedSectionsInput, FolderLookupInput,
-    GetNotesInput, IdOnlyResult, KibelClient, MoveNoteToAnotherFolderInput, Note, PageInput,
-    PathLookupInput, ResourceContract, SearchFolderInput, SearchNoteInput, UpdateNoteInput,
+    trusted_operation_contract, trusted_operations, AttachNoteToFolderInput, CreateCommentInput,
+    CreateCommentReplyInput, CreateFolderInput, CreateNoteFolderInput, CreateNoteInput,
+    CreateNoteResult, FeedSectionsInput, FolderLookupInput, GetNotesInput, IdOnlyResult,
+    KibelClient, MoveNoteToAnotherFolderInput, Note, PageInput, PathLookupInput, ResourceContract,
+    SearchFolderInput, SearchNoteInput, TrustedOperation, UpdateNoteInput,
 };
 pub use config::{default_config_path, Config, Profile};
 pub use error::KibelClientError;
