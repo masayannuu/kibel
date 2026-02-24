@@ -42,6 +42,7 @@ pub enum Command {
     Feed(FeedArgs),
     Comment(CommentArgs),
     Note(NoteArgs),
+    Graphql(GraphqlArgs),
     Completion(CompletionArgs),
     Version(VersionArgs),
 }
@@ -362,6 +363,71 @@ pub struct NoteAttachToFolderArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct GraphqlArgs {
+    #[command(subcommand)]
+    pub command: GraphqlCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum GraphqlCommand {
+    Run(GraphqlRunArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct GraphqlRunArgs {
+    #[arg(long, conflicts_with = "query_file", help = "GraphQL query text")]
+    pub query: Option<String>,
+    #[arg(
+        long = "query-file",
+        value_name = "PATH",
+        conflicts_with = "query",
+        help = "Path to a file containing GraphQL query text"
+    )]
+    pub query_file: Option<PathBuf>,
+    #[arg(
+        long,
+        conflicts_with = "variables_file",
+        help = "JSON object for GraphQL variables"
+    )]
+    pub variables: Option<String>,
+    #[arg(
+        long = "variables-file",
+        value_name = "PATH",
+        conflicts_with = "variables",
+        help = "Path to a file containing GraphQL variables JSON object"
+    )]
+    pub variables_file: Option<PathBuf>,
+    #[arg(long, default_value_t = 15, help = "Request timeout (seconds)")]
+    pub timeout_secs: u64,
+    #[arg(
+        long = "response-limit-mib",
+        default_value_t = 2,
+        help = "Response size limit (MiB)"
+    )]
+    pub response_limit_mib: u64,
+    #[arg(long = "max-depth", default_value_t = 8, help = "Maximum query depth")]
+    pub max_depth: u32,
+    #[arg(
+        long = "max-complexity",
+        default_value_t = 1000,
+        help = "Maximum static complexity score"
+    )]
+    pub max_complexity: u32,
+    #[arg(
+        long = "allow-mutation",
+        action = ArgAction::SetTrue,
+        help = "Allow mutation execution in graphql run mode"
+    )]
+    pub allow_mutation: bool,
+    #[arg(
+        long = "unsafe-no-cost-check",
+        action = ArgAction::SetTrue,
+        help = "Allow execution when query shape analysis fails"
+    )]
+    pub unsafe_no_cost_check: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct CompletionArgs {
     pub shell: Shell,
 }
@@ -392,8 +458,8 @@ fn parse_folder_arg(raw: &str) -> Result<NoteFolderArg, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_folder_arg, AuthCommand, Cli, Command, ConfigCommand, ConfigSetCommand, GroupCommand,
-        NoteCommand, SearchCommand,
+        parse_folder_arg, AuthCommand, Cli, Command, ConfigCommand, ConfigSetCommand,
+        GraphqlCommand, GroupCommand, NoteCommand, SearchCommand,
     };
     use clap::Parser;
 
@@ -637,6 +703,34 @@ mod tests {
                 ConfigCommand::Profiles(_) => panic!("expected set command"),
             },
             _ => panic!("expected config command"),
+        }
+    }
+
+    #[test]
+    fn parse_graphql_run_defaults() {
+        let cli = Cli::try_parse_from([
+            "kibel",
+            "graphql",
+            "run",
+            "--query",
+            "query Q { groups { edges { node { id } } } }",
+        ])
+        .expect("parse should succeed");
+
+        match cli.command {
+            Command::Graphql(args) => match args.command {
+                GraphqlCommand::Run(run) => {
+                    assert!(run.query.is_some());
+                    assert!(run.variables.is_none());
+                    assert_eq!(run.timeout_secs, 15);
+                    assert_eq!(run.response_limit_mib, 2);
+                    assert_eq!(run.max_depth, 8);
+                    assert_eq!(run.max_complexity, 1000);
+                    assert!(!run.allow_mutation);
+                    assert!(!run.unsafe_no_cost_check);
+                }
+            },
+            _ => panic!("expected graphql command"),
         }
     }
 }

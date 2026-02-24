@@ -38,4 +38,5 @@
   - CI基準: endpoint introspection snapshot から作る snapshot/codegen
   - refresh: `kibel-tools resource-contract refresh-endpoint`
 - built-in 操作は generated trusted operation registry を経由して実行前検証する。
+- `graphql run` は trusted registry外の明示経路として、guardrail 適用後に実行する。
 - 仕様差異がある場合は runtime introspection か fallback contract で吸収する（現在 createNote）。

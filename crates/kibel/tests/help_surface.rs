@@ -53,6 +53,8 @@ fn all_command_paths_expose_help() {
         &["note", "move-to-folder"],
         &["note", "attach-to-folder"],
         &["note", "update"],
+        &["graphql"],
+        &["graphql", "run"],
         &["completion"],
         &["version"],
     ];

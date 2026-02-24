@@ -46,6 +46,7 @@ export KIBELA_ACCESS_TOKEN="<your-token>"
 kibel --json auth status
 kibel --json search note --query onboarding --first 16
 kibel --json note get --id N1
+kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
 ## Auth And Config Behavior
@@ -70,6 +71,7 @@ Current command groups:
 
 - `auth`, `config`
 - `search`, `group`, `folder`, `feed`, `comment`, `note`
+- `graphql` (ad-hoc execution with guardrails)
 - `completion`, `version`
 
 Use `kibel --help` and `kibel <group> --help` for full options.

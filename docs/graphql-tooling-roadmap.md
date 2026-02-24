@@ -17,11 +17,11 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Dynamic GraphQL stub E2E based on committed contracts.
 - Runtime schema adaptation path for createNote.
 - Built-in operations are executed through generated trusted operation registry with runtime validation.
+- `graphql run` free-query lane exists with mutation opt-in and baseline guardrails.
 
 ### Current gaps
-- No explicit untrusted free-query lane with guardrails.
 - Schema refresh governance is still mostly operator-driven.
-- Free-query lane contract (JSON error normalization) is not yet specified.
+- Persisted-query/safelist adoption is still pending backend capability decision.
 
 ## Target Model
 
