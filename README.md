@@ -78,6 +78,24 @@ Current command groups:
 
 Use `kibel --help` and `kibel <group> --help` for full options.
 
+## Supported vs Not Supported (Current)
+
+Supported:
+
+- automation-friendly operations: search/read/create/update around notes, comments, folders, and feeds.
+- `graphql run` for ad-hoc queries and bounded/safe mutations.
+
+Not supported (intentional):
+
+- destructive/admin operations such as delete flows, member add/remove, organization/group setting rewrites, and permission policy rewrites.
+- any hidden bypass path for these operations.
+
+`graphql run` safety boundary:
+
+- mutation requires explicit `--allow-mutation`.
+- mutation root field must be in trusted resource-contract allowlist.
+- no `--dangerous` override exists in current release.
+
 ## Library Usage (`kibel-client`)
 
 ```rust

@@ -121,3 +121,4 @@ flowchart TD
 ## Non-goals
 - Generic GraphQL SDK generation for all schema types.
 - Hidden automatic merge of schema changes without review.
+- Destructive/admin mutation bypass path (for example `--dangerous`) in default CLI surface.
