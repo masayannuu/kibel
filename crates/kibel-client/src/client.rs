@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::fs;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -611,6 +612,37 @@ impl KibelClient {
     #[must_use]
     pub fn origin(&self) -> &str {
         &self.origin
+    }
+
+    /// Executes an ad-hoc GraphQL request outside the trusted operation registry.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when query or limits are invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn run_untrusted_graphql(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: usize,
+    ) -> Result<Value, KibelClientError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(KibelClientError::InputInvalid(
+                "query is required".to_string(),
+            ));
+        }
+        if max_response_bytes == 0 {
+            return Err(KibelClientError::InputInvalid(
+                "max response bytes must be greater than 0".to_string(),
+            ));
+        }
+        self.request_graphql_raw_with_limits(
+            query,
+            variables,
+            timeout_ms.max(100),
+            Some(max_response_bytes),
+        )
     }
 
     /// Fetches a note by id.
@@ -1284,7 +1316,17 @@ impl KibelClient {
         query: &str,
         variables: Value,
     ) -> Result<Value, KibelClientError> {
-        let timeout = Duration::from_millis(self.timeout_ms.max(100));
+        self.request_graphql_raw_with_limits(query, variables, self.timeout_ms, None)
+    }
+
+    fn request_graphql_raw_with_limits(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: Option<usize>,
+    ) -> Result<Value, KibelClientError> {
+        let timeout = Duration::from_millis(timeout_ms.max(100));
         let payload = Value::Object(serde_json::Map::from_iter([
             ("query".to_string(), Value::String(query.to_string())),
             ("variables".to_string(), variables),
@@ -1312,15 +1354,11 @@ impl KibelClient {
 
         let (raw, status_code) = match request.send_string(&payload_raw) {
             Ok(response) => {
-                let body = response
-                    .into_string()
-                    .map_err(|err| KibelClientError::Transport(err.to_string()))?;
+                let body = read_response_body(response, max_response_bytes)?;
                 (body, None)
             }
             Err(ureq::Error::Status(code, response)) => {
-                let body = response
-                    .into_string()
-                    .map_err(|err| KibelClientError::Transport(err.to_string()))?;
+                let body = read_response_body(response, max_response_bytes)?;
                 (body, Some(code))
             }
             Err(err) => {
@@ -1375,6 +1413,32 @@ fn endpoint_from_origin(origin: &str) -> String {
         normalized.to_string()
     } else {
         format!("{normalized}/api/v1")
+    }
+}
+
+fn read_response_body(
+    response: ureq::Response,
+    max_response_bytes: Option<usize>,
+) -> Result<String, KibelClientError> {
+    match max_response_bytes {
+        Some(limit) => {
+            let mut buffer = Vec::new();
+            response
+                .into_reader()
+                .take((limit.saturating_add(1)) as u64)
+                .read_to_end(&mut buffer)
+                .map_err(|error| KibelClientError::Transport(error.to_string()))?;
+            if buffer.len() > limit {
+                return Err(KibelClientError::Transport(format!(
+                    "response body exceeds limit: {limit} bytes"
+                )));
+            }
+            String::from_utf8(buffer)
+                .map_err(|error| KibelClientError::Transport(error.to_string()))
+        }
+        None => response
+            .into_string()
+            .map_err(|error| KibelClientError::Transport(error.to_string())),
     }
 }
 

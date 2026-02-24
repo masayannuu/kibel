@@ -13,6 +13,7 @@ use kibel_client::{
     SearchNoteInput, TokenStore, UpdateNoteInput,
 };
 use serde_json::{json, Value};
+use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -120,6 +121,7 @@ fn execute(cli: &cli::Cli) -> Result<CommandOutput, CliError> {
         cli::Command::Feed(args) => execute_feed(cli, args, stdin_token, env_token),
         cli::Command::Comment(args) => execute_comment(cli, args, stdin_token, env_token),
         cli::Command::Note(args) => execute_note(cli, args, stdin_token, env_token),
+        cli::Command::Graphql(args) => execute_graphql(cli, args, stdin_token, env_token),
         cli::Command::Version(args) => Ok(execute_version(args)),
         cli::Command::Completion(_) => unreachable!("completion is handled before execute"),
     }
@@ -138,7 +140,8 @@ fn command_uses_token_inputs(command: &cli::Command) -> bool {
         | cli::Command::Folder(_)
         | cli::Command::Feed(_)
         | cli::Command::Comment(_)
-        | cli::Command::Note(_) => true,
+        | cli::Command::Note(_)
+        | cli::Command::Graphql(_) => true,
         cli::Command::Config(_) | cli::Command::Completion(_) | cli::Command::Version(_) => false,
     }
 }
@@ -635,6 +638,372 @@ fn execute_note(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GraphqlOperationKind {
+    Query,
+    Mutation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QueryShape {
+    max_depth: u32,
+    complexity: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GraphqlGuardrails {
+    timeout_secs: u64,
+    response_limit_bytes: usize,
+    max_depth: u32,
+    max_complexity: u32,
+    allow_mutation: bool,
+    unsafe_no_cost_check: bool,
+}
+
+fn execute_graphql(
+    cli: &cli::Cli,
+    args: &cli::GraphqlArgs,
+    stdin_token: Option<String>,
+    env_token: Option<String>,
+) -> Result<CommandOutput, CliError> {
+    let ctx = resolve_client_context(cli, stdin_token, env_token)?;
+
+    match &args.command {
+        cli::GraphqlCommand::Run(command) => {
+            let query = resolve_graphql_query(command)?;
+            let variables = resolve_graphql_variables(command)?;
+            let guardrails = build_graphql_guardrails(command)?;
+            enforce_graphql_guardrails(&query, &variables, guardrails)?;
+
+            let response = ctx.client.run_untrusted_graphql(
+                &query,
+                variables,
+                guardrails.timeout_secs.saturating_mul(1000),
+                guardrails.response_limit_bytes,
+            )?;
+
+            Ok(CommandOutput {
+                data: json!({
+                    "response": response,
+                    "meta": {
+                        "team": ctx.team,
+                        "origin": ctx.client.origin(),
+                        "token_source": ctx.token_source,
+                        "guardrails": {
+                            "timeout_secs": guardrails.timeout_secs,
+                            "response_limit_bytes": guardrails.response_limit_bytes,
+                            "max_depth": guardrails.max_depth,
+                            "max_complexity": guardrails.max_complexity,
+                            "allow_mutation": guardrails.allow_mutation,
+                            "unsafe_no_cost_check": guardrails.unsafe_no_cost_check,
+                        }
+                    }
+                }),
+                message: "graphql run completed".to_string(),
+            })
+        }
+    }
+}
+
+fn resolve_graphql_query(command: &cli::GraphqlRunArgs) -> Result<String, CliError> {
+    if let Some(raw) = command.query.as_deref() {
+        return normalize_owned(raw).ok_or_else(|| {
+            CliError::new(
+                ErrorCode::InputInvalid,
+                "--query is empty; provide GraphQL query text",
+            )
+        });
+    }
+
+    if let Some(path) = &command.query_file {
+        let raw = fs::read_to_string(path).map_err(|error| {
+            CliError::new(
+                ErrorCode::TransportError,
+                format!("failed to read query file {}: {error}", path.display()),
+            )
+        })?;
+        return normalize_owned(&raw).ok_or_else(|| {
+            CliError::new(
+                ErrorCode::InputInvalid,
+                "query file is empty; provide GraphQL query text",
+            )
+        });
+    }
+
+    Err(CliError::new(
+        ErrorCode::InputInvalid,
+        "either --query or --query-file is required",
+    ))
+}
+
+fn resolve_graphql_variables(command: &cli::GraphqlRunArgs) -> Result<Value, CliError> {
+    let raw = if let Some(path) = &command.variables_file {
+        fs::read_to_string(path).map_err(|error| {
+            CliError::new(
+                ErrorCode::TransportError,
+                format!("failed to read variables file {}: {error}", path.display()),
+            )
+        })?
+    } else {
+        command
+            .variables
+            .clone()
+            .unwrap_or_else(|| "{}".to_string())
+    };
+
+    let parsed = serde_json::from_str::<Value>(&raw).map_err(|error| {
+        CliError::new(
+            ErrorCode::InputInvalid,
+            format!("variables must be valid JSON object: {error}"),
+        )
+    })?;
+
+    if !parsed.is_object() {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "variables must be a JSON object",
+        ));
+    }
+    Ok(parsed)
+}
+
+fn build_graphql_guardrails(command: &cli::GraphqlRunArgs) -> Result<GraphqlGuardrails, CliError> {
+    if command.timeout_secs == 0 || command.timeout_secs > 60 {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "timeout-secs must be in range 1..=60",
+        ));
+    }
+    if command.response_limit_mib == 0 || command.response_limit_mib > 8 {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "response-limit-mib must be in range 1..=8",
+        ));
+    }
+    if command.max_depth == 0 {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "max-depth must be greater than 0",
+        ));
+    }
+    if command.max_complexity == 0 {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "max-complexity must be greater than 0",
+        ));
+    }
+
+    let mib = usize::try_from(command.response_limit_mib).map_err(|_| {
+        CliError::new(
+            ErrorCode::InputInvalid,
+            "response-limit-mib is out of supported range",
+        )
+    })?;
+    let response_limit_bytes = mib.checked_mul(1024 * 1024).ok_or_else(|| {
+        CliError::new(
+            ErrorCode::InputInvalid,
+            "response-limit-mib overflowed byte conversion",
+        )
+    })?;
+
+    Ok(GraphqlGuardrails {
+        timeout_secs: command.timeout_secs,
+        response_limit_bytes,
+        max_depth: command.max_depth,
+        max_complexity: command.max_complexity,
+        allow_mutation: command.allow_mutation,
+        unsafe_no_cost_check: command.unsafe_no_cost_check,
+    })
+}
+
+fn enforce_graphql_guardrails(
+    query: &str,
+    variables: &Value,
+    guardrails: GraphqlGuardrails,
+) -> Result<(), CliError> {
+    if !variables.is_object() {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "variables must be a JSON object",
+        ));
+    }
+
+    if detect_graphql_operation_kind(query) == Some(GraphqlOperationKind::Mutation)
+        && !guardrails.allow_mutation
+    {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "mutation is blocked in graphql run mode; pass --allow-mutation to execute",
+        ));
+    }
+
+    match analyze_query_shape(query) {
+        Ok(shape) => {
+            if shape.max_depth > guardrails.max_depth {
+                return Err(CliError::new(
+                    ErrorCode::InputInvalid,
+                    format!(
+                        "query depth {} exceeds max-depth {}",
+                        shape.max_depth, guardrails.max_depth
+                    ),
+                ));
+            }
+            if shape.complexity > guardrails.max_complexity {
+                return Err(CliError::new(
+                    ErrorCode::InputInvalid,
+                    format!(
+                        "query complexity {} exceeds max-complexity {}",
+                        shape.complexity, guardrails.max_complexity
+                    ),
+                ));
+            }
+        }
+        Err(error) => {
+            if !guardrails.unsafe_no_cost_check {
+                return Err(CliError::new(
+                    ErrorCode::InputInvalid,
+                    format!(
+                        "query shape analysis failed: {error}; rerun with --unsafe-no-cost-check to bypass"
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn detect_graphql_operation_kind(query: &str) -> Option<GraphqlOperationKind> {
+    let normalized = query.trim_start();
+    if normalized.starts_with("mutation") {
+        Some(GraphqlOperationKind::Mutation)
+    } else if normalized.starts_with('{')
+        || normalized.starts_with("query")
+        || normalized.starts_with("subscription")
+    {
+        Some(GraphqlOperationKind::Query)
+    } else {
+        None
+    }
+}
+
+fn analyze_query_shape(query: &str) -> Result<QueryShape, String> {
+    let bytes = query.as_bytes();
+    let mut index = 0usize;
+    let mut depth = 0u32;
+    let mut max_depth = 0u32;
+    let mut complexity = 0u32;
+    let mut paren_depth = 0u32;
+    let mut in_comment = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut has_selection = false;
+
+    while index < bytes.len() {
+        let c = bytes[index];
+
+        if in_comment {
+            if c == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        match c {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'"' => {
+                in_string = true;
+                index += 1;
+            }
+            b'(' => {
+                paren_depth = paren_depth.saturating_add(1);
+                index += 1;
+            }
+            b')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'{' => {
+                depth = depth.saturating_add(1);
+                has_selection = true;
+                if depth > max_depth {
+                    max_depth = depth;
+                }
+                index += 1;
+            }
+            b'}' => {
+                if depth == 0 {
+                    return Err("query has unmatched closing brace".to_string());
+                }
+                depth -= 1;
+                index += 1;
+            }
+            _ if is_identifier_start(c) => {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && is_identifier_continue(bytes[index]) {
+                    index += 1;
+                }
+                if depth > 0 && paren_depth == 0 {
+                    let token = std::str::from_utf8(&bytes[start..index])
+                        .map_err(|_| "query contains non-utf8 token".to_string())?;
+                    if !is_graphql_keyword(token) {
+                        complexity = complexity.saturating_add(1);
+                    }
+                }
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    if depth != 0 {
+        return Err("query has unmatched opening brace".to_string());
+    }
+    if !has_selection {
+        return Err("query must include a selection set".to_string());
+    }
+    if complexity == 0 {
+        return Err("query complexity is zero (no selectable fields found)".to_string());
+    }
+
+    Ok(QueryShape {
+        max_depth,
+        complexity,
+    })
+}
+
+fn is_identifier_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_'
+}
+
+fn is_identifier_continue(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+fn is_graphql_keyword(token: &str) -> bool {
+    matches!(
+        token,
+        "query" | "mutation" | "subscription" | "fragment" | "on" | "true" | "false" | "null"
+    )
+}
+
 fn execute_version(_command: &cli::VersionArgs) -> CommandOutput {
     let version = env!("CARGO_PKG_VERSION");
     CommandOutput {
@@ -749,4 +1118,87 @@ fn generated_request_id() -> String {
     let bytes = now.to_le_bytes();
     let lower_32_bits = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     format!("req-{lower_32_bits:08x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        analyze_query_shape, build_graphql_guardrails, detect_graphql_operation_kind,
+        enforce_graphql_guardrails, resolve_graphql_variables, GraphqlGuardrails,
+        GraphqlOperationKind,
+    };
+    use crate::cli;
+    use serde_json::json;
+
+    fn graphql_run_args(query: &str) -> cli::GraphqlRunArgs {
+        cli::GraphqlRunArgs {
+            query: Some(query.to_string()),
+            query_file: None,
+            variables: Some("{}".to_string()),
+            variables_file: None,
+            timeout_secs: 15,
+            response_limit_mib: 2,
+            max_depth: 8,
+            max_complexity: 1000,
+            allow_mutation: false,
+            unsafe_no_cost_check: false,
+        }
+    }
+
+    #[test]
+    fn detect_operation_kind_handles_query_and_mutation() {
+        assert_eq!(
+            detect_graphql_operation_kind("query Q { groups { edges { node { id } } } }"),
+            Some(GraphqlOperationKind::Query)
+        );
+        assert_eq!(
+            detect_graphql_operation_kind(
+                "mutation M { createFolder(input: {}) { folder { id } } }"
+            ),
+            Some(GraphqlOperationKind::Mutation)
+        );
+    }
+
+    #[test]
+    fn analyze_query_shape_computes_depth_and_complexity() {
+        let shape = analyze_query_shape("query Q { groups { edges { node { id } } } }")
+            .expect("shape analysis should succeed");
+        assert!(shape.max_depth >= 4);
+        assert!(shape.complexity >= 4);
+    }
+
+    #[test]
+    fn build_graphql_guardrails_rejects_invalid_ranges() {
+        let mut args = graphql_run_args("query Q { groups { edges { node { id } } } }");
+        args.timeout_secs = 0;
+        assert!(build_graphql_guardrails(&args).is_err());
+        args.timeout_secs = 15;
+        args.response_limit_mib = 9;
+        assert!(build_graphql_guardrails(&args).is_err());
+    }
+
+    #[test]
+    fn resolve_graphql_variables_requires_object() {
+        let mut args = graphql_run_args("query Q { groups { edges { node { id } } } }");
+        args.variables = Some("[1,2,3]".to_string());
+        assert!(resolve_graphql_variables(&args).is_err());
+    }
+
+    #[test]
+    fn enforce_graphql_guardrails_blocks_mutation_without_opt_in() {
+        let guardrails = GraphqlGuardrails {
+            timeout_secs: 15,
+            response_limit_bytes: 2 * 1024 * 1024,
+            max_depth: 8,
+            max_complexity: 1000,
+            allow_mutation: false,
+            unsafe_no_cost_check: false,
+        };
+        let result = enforce_graphql_guardrails(
+            "mutation M($input: CreateFolderInput!) { createFolder(input: $input) { folder { id } } }",
+            &json!({ "input": { "folder": { "groupId": "G1", "folderName": "Engineering" } } }),
+            guardrails,
+        );
+        assert!(result.is_err());
+    }
 }

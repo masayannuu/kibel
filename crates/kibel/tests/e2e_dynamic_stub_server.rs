@@ -236,3 +236,72 @@ fn all_resources_work_against_dynamic_contract_stub_server() {
         );
     }
 }
+
+#[test]
+fn graphql_run_query_works_with_guardrails() {
+    let server = DynamicGraphqlStubServer::start();
+    let (output, payload) = run_kibel_json(
+        &server,
+        &[
+            "graphql",
+            "run",
+            "--query",
+            "query FreeNote($id: ID!) { note(id: $id) { id title content } }",
+            "--variables",
+            "{\"id\":\"N1\"}",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(payload["data"]["response"]["data"]["note"]["id"], "N1");
+    assert_eq!(payload["data"]["meta"]["guardrails"]["timeout_secs"], 15);
+}
+
+#[test]
+fn graphql_run_blocks_mutation_without_allow_flag() {
+    let server = DynamicGraphqlStubServer::start();
+    let (output, payload) = run_kibel_json(
+        &server,
+        &[
+            "graphql",
+            "run",
+            "--query",
+            "mutation FreeCreateFolder($input: CreateFolderInput!) { createFolder(input: $input) { folder { id } } }",
+            "--variables",
+            "{\"input\":{\"folder\":{\"groupId\":\"G1\",\"folderName\":\"Engineering\"}}}",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(payload["ok"], Value::Bool(false));
+    assert_eq!(payload["error"]["code"], "INPUT_INVALID");
+    assert!(payload["error"]["message"]
+        .as_str()
+        .expect("error message should be string")
+        .contains("--allow-mutation"));
+}
+
+#[test]
+fn graphql_run_allows_mutation_with_opt_in_flag() {
+    let server = DynamicGraphqlStubServer::start();
+    let (output, payload) = run_kibel_json(
+        &server,
+        &[
+            "graphql",
+            "run",
+            "--allow-mutation",
+            "--query",
+            "mutation FreeCreateFolder($input: CreateFolderInput!) { createFolder(input: $input) { folder { id } } }",
+            "--variables",
+            "{\"input\":{\"folder\":{\"groupId\":\"G1\",\"folderName\":\"Engineering\"}}}",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["response"]["data"]["createFolder"]["folder"]["id"],
+        "F-created"
+    );
+}
