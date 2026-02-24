@@ -42,12 +42,24 @@
 6. GitHub Release に以下成果物が揃っていることを確認する。
    - `kibel-${VERSION}-linux-x86_64.tar.gz`
    - `kibel-${VERSION}-linux-aarch64.tar.gz`
+   - `kibel-${VERSION}-darwin-x86_64.tar.gz`
+   - `kibel-${VERSION}-darwin-aarch64.tar.gz`
    - 各 `*.sha256`
    - `kibel-${VERSION}-checksums.txt`
 7. ダウンロード後の検証を実施する。
    - `sha256sum -c kibel-${VERSION}-linux-x86_64.tar.gz.sha256`
    - `sha256sum -c kibel-${VERSION}-linux-aarch64.tar.gz.sha256`
 8. release workflow の provenance attestation ステップが成功していることを確認する。
-9. crates.io 公開する場合は `kibel-client` を先に publish し、index反映後に `kibel` を publish する。
-10. `kibel` publish 前に dry-run を行う。
+9. Homebrew tap sync を使う場合、`homebrew-tap` job が成功していることを確認する。
+10. crates.io 公開する場合は `kibel-client` を先に publish し、index反映後に `kibel` を publish する。
+11. `kibel` publish 前に dry-run を行う。
    - `cargo publish --dry-run -p kibel`
+
+## Homebrew tap sync configuration
+
+- Workflow: `.github/workflows/release.yml` (`homebrew-tap` job)
+- Required GitHub Secrets:
+  - `HOMEBREW_TAP_REPO` (example: `masayannuu/homebrew-tap`)
+  - `HOMEBREW_TAP_TOKEN` (contents:write on tap repo)
+- Formula renderer:
+  - `scripts/render_homebrew_formula.sh`
