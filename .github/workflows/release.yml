@@ -4,9 +4,19 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -30,21 +40,83 @@ jobs:
       - name: Verify package manifests
         run: |
           cargo package --locked -p kibel-client
+  build-linux:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
 
-      - name: Build release binary
-        run: cargo build --release -p kibel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
-      - name: Bundle release artifact
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build release binary (linux matrix)
+        run: |
+          cross build --release -p kibel --target "${{ matrix.target }}"
+
+      - name: Bundle release artifact (linux matrix)
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          ARCHIVE="kibel-${VERSION}-linux-x86_64.tar.gz"
-          tar -C target/release -czf "${ARCHIVE}" kibel
+          ARCHIVE="kibel-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/kibel" ./kibel
+          tar -czf "${ARCHIVE}" kibel
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
-      - name: Upload release artifacts
+      - name: Upload packaged linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kibel-${{ github.ref_name }}-linux-x86_64
+          name: kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}
           path: |
-            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz
-            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+            kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz.sha256
+
+  release:
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kibel-${{ github.ref_name }}-linux-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create combined checksums manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          cd dist
+          sha256sum kibel-"${VERSION}"-linux-*.tar.gz > "kibel-${VERSION}-checksums.txt"
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*-checksums.txt
+          generate_release_notes: true
+
+      - name: Attest release artifacts provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
