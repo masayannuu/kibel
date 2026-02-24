@@ -6,16 +6,17 @@ use clap_complete::generate;
 use error::{CliError, ErrorCode};
 use kibel_client::{
     default_config_path, require_team, resolve_access_token, resource_contracts,
-    token_source_label, AttachNoteToFolderInput, Config, CreateCommentInput,
+    token_source_label, token_store_subject, AttachNoteToFolderInput, Config, CreateCommentInput,
     CreateCommentReplyInput, CreateFolderInput, CreateNoteFolderInput, CreateNoteInput,
     FeedSectionsInput, FolderLookupInput, GetNotesInput, KeychainTokenStore, KibelClient,
     MoveNoteToAnotherFolderInput, PageInput, PathLookupInput, ResolveTokenInput, SearchFolderInput,
     SearchNoteInput, TokenStore, UpdateNoteInput,
 };
+use rpassword::prompt_password;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -156,34 +157,58 @@ fn execute_auth(
     match &args.command {
         cli::AuthCommand::Login(command) => {
             let (config_path, mut config) = load_config(cli.config_path.clone())?;
-            let team = require_team(command.team.as_deref().or(cli.team.as_deref()), &config)?;
+            let interactive = is_interactive_terminal();
+            let requested_team = command
+                .team
+                .clone()
+                .or_else(|| requested_team_from_cli(cli));
+            let requested_origin = requested_origin_from_cli(cli);
+            let origin = resolve_login_origin(
+                requested_origin.as_deref(),
+                requested_team.as_deref(),
+                &config,
+                interactive,
+            )?;
+            let team = resolve_login_team(
+                requested_team.as_deref(),
+                Some(&origin),
+                &config,
+                interactive,
+            )?;
+            let (token, token_source) = resolve_login_token(
+                cli.with_token,
+                stdin_token.as_deref(),
+                env_token.as_deref(),
+                interactive,
+            )?;
 
-            let Some(token) = stdin_token
-                .as_deref()
-                .and_then(normalize_owned)
-                .or_else(|| env_token.as_deref().and_then(normalize_owned))
-            else {
-                return Err(CliError::new(
-                    ErrorCode::InputInvalid,
-                    "token is required (--with-token stdin or token env)",
-                ));
-            };
-
-            let token_source = if cli.with_token { "stdin" } else { "env" };
             let store = KeychainTokenStore::default();
-            store.set_token(&team, &token)?;
-            config.set_profile_token(&team, &token);
-            if let Some(origin) = normalize_owned(&cli.origin) {
-                config.set_profile_origin(&team, &origin);
+            let subject = token_store_subject(&team, Some(&origin));
+            let mut stored_in = Vec::new();
+            let mut keychain_error = None;
+
+            match store.set_token(&subject, &token) {
+                Ok(()) => stored_in.push("keychain"),
+                Err(err) => keychain_error = Some(err.to_string()),
             }
+
+            config.set_profile_token(&team, &token);
+            config.set_profile_origin(&team, &origin);
             config.set_default_team_if_missing(&team);
             config.save(&config_path)?;
+            stored_in.push("config");
+            let access_token_settings_url = kibela_access_token_settings_url(&origin);
 
             Ok(CommandOutput {
                 data: json!({
                     "team": team,
+                    "origin": origin,
                     "token_source": token_source,
-                    "stored_in": ["keychain", "config"],
+                    "stored_in": stored_in,
+                    "token_store_subject": subject,
+                    "keychain_available": keychain_error.is_none(),
+                    "keychain_error": keychain_error,
+                    "access_token_settings_url": access_token_settings_url,
                     "config_path": config_path,
                 }),
                 message: "auth login completed".to_string(),
@@ -191,17 +216,36 @@ fn execute_auth(
         }
         cli::AuthCommand::Logout(command) => {
             let (config_path, mut config) = load_config(cli.config_path.clone())?;
-            let team = require_team(command.team.as_deref().or(cli.team.as_deref()), &config)?;
+            let requested_team = command
+                .team
+                .clone()
+                .or_else(|| requested_team_from_cli(cli));
+            let team = require_team(requested_team.as_deref(), &config)?;
+            let requested_origin = requested_origin_from_cli(cli);
+            let resolved_origin = config.resolve_origin(requested_origin.as_deref(), Some(&team));
 
             let store = KeychainTokenStore::default();
-            store.delete_token(&team)?;
+            let mut keychain_deleted = false;
+            let mut keychain_error = None;
+            let mut subjects = token_store_lookup_subjects(&team, resolved_origin.as_deref());
+            if subjects.is_empty() {
+                subjects.push(team.clone());
+            }
+            for subject in subjects {
+                match store.delete_token(&subject) {
+                    Ok(()) => keychain_deleted = true,
+                    Err(err) => keychain_error = Some(err.to_string()),
+                }
+            }
             let config_token_removed = config.clear_profile_token(&team);
             config.save(&config_path)?;
 
             Ok(CommandOutput {
                 data: json!({
                     "team": team,
-                    "keychain_deleted": true,
+                    "origin": resolved_origin,
+                    "keychain_deleted": keychain_deleted,
+                    "keychain_error": keychain_error,
                     "config_token_removed": config_token_removed,
                     "config_path": config_path,
                 }),
@@ -210,10 +254,15 @@ fn execute_auth(
         }
         cli::AuthCommand::Status(command) => {
             let (_, config) = load_config(cli.config_path.clone())?;
-            let requested_team = command.team.clone().or_else(|| cli.team.clone());
+            let requested_team = command
+                .team
+                .clone()
+                .or_else(|| requested_team_from_cli(cli));
+            let requested_origin = requested_origin_from_cli(cli);
             let resolved = resolve_access_token(
                 &ResolveTokenInput {
                     requested_team,
+                    requested_origin,
                     stdin_token,
                     env_token,
                 },
@@ -319,12 +368,33 @@ fn execute_search(
 
     match &args.command {
         cli::SearchCommand::Note(command) => {
+            if command.mine {
+                if search_note_mine_has_unsupported_filters(command) {
+                    return Err(CliError::new(
+                        ErrorCode::InputInvalid,
+                        "--mine cannot be combined with other search filters",
+                    ));
+                }
+                let results = ctx.client.get_current_user_latest_notes(PageInput {
+                    first: command.first,
+                })?;
+                return Ok(CommandOutput {
+                    data: json!({
+                        "results": results,
+                        "meta": context_meta(&ctx),
+                    }),
+                    message: "search note completed".to_string(),
+                });
+            }
+
+            let user_ids = command.user_ids.clone();
             let results = ctx.client.search_note(&SearchNoteInput {
                 query: command.query.clone(),
                 resources: command.resources.clone(),
                 coediting: command.coediting,
                 updated: command.updated.clone(),
                 group_ids: command.group_ids.clone(),
+                user_ids,
                 folder_ids: command.folder_ids.clone(),
                 liker_ids: command.liker_ids.clone(),
                 is_archived: command.is_archived,
@@ -353,6 +423,19 @@ fn execute_search(
             })
         }
     }
+}
+
+fn search_note_mine_has_unsupported_filters(command: &cli::SearchNoteArgs) -> bool {
+    !command.query.trim().is_empty()
+        || !command.resources.is_empty()
+        || command.coediting.is_some()
+        || command.updated.is_some()
+        || !command.group_ids.is_empty()
+        || !command.user_ids.is_empty()
+        || !command.folder_ids.is_empty()
+        || !command.liker_ids.is_empty()
+        || command.is_archived.is_some()
+        || command.sort_by.is_some()
 }
 
 fn execute_group(
@@ -1174,11 +1257,13 @@ fn resolve_client_context(
     env_token: Option<String>,
 ) -> Result<ClientContext, CliError> {
     let (_, config) = load_config(cli.config_path.clone())?;
-    let requested_origin = normalize_owned(&cli.origin);
+    let requested_team = requested_team_from_cli(cli);
+    let requested_origin = requested_origin_from_cli(cli);
 
     let resolved = resolve_access_token(
         &ResolveTokenInput {
-            requested_team: cli.team.clone(),
+            requested_team: requested_team.clone(),
+            requested_origin: requested_origin.clone(),
             stdin_token,
             env_token,
         },
@@ -1195,7 +1280,7 @@ fn resolve_client_context(
     let team = resolved
         .team
         .clone()
-        .or_else(|| config.resolve_team(cli.team.as_deref()));
+        .or_else(|| config.resolve_team(requested_team.as_deref()));
     let origin = config
         .resolve_origin(requested_origin.as_deref(), team.as_deref())
         .ok_or_else(|| {
@@ -1220,6 +1305,176 @@ fn context_meta(ctx: &ClientContext) -> Value {
         "origin": ctx.client.origin(),
         "token_source": ctx.token_source,
     })
+}
+
+fn kibela_access_token_settings_url(origin: &str) -> String {
+    let base = origin.trim_end_matches('/');
+    format!("{base}/settings/access_tokens")
+}
+
+fn requested_team_from_cli(cli: &cli::Cli) -> Option<String> {
+    cli.team.as_deref().and_then(normalize_owned).or_else(|| {
+        std::env::var("KIBELA_TENANT")
+            .ok()
+            .and_then(|v| normalize_owned(&v))
+    })
+}
+
+fn requested_origin_from_cli(cli: &cli::Cli) -> Option<String> {
+    normalize_origin_owned(&cli.origin).or_else(|| {
+        std::env::var("KIBELA_TENANT_ORIGIN")
+            .ok()
+            .and_then(|v| normalize_origin_owned(&v))
+    })
+}
+
+fn resolve_login_origin(
+    requested_origin: Option<&str>,
+    requested_team: Option<&str>,
+    config: &Config,
+    interactive: bool,
+) -> Result<String, CliError> {
+    if let Some(origin) = requested_origin.and_then(normalize_origin_owned) {
+        return Ok(origin);
+    }
+
+    if let Some(origin) = config.resolve_origin(None, requested_team) {
+        if let Some(normalized) = normalize_origin_owned(&origin) {
+            return Ok(normalized);
+        }
+    }
+
+    if interactive {
+        return prompt_origin_input();
+    }
+
+    Err(CliError::new(
+        ErrorCode::InputInvalid,
+        "origin is required (--origin/KIBELA_ORIGIN or profile origin)",
+    ))
+}
+
+fn resolve_login_team(
+    requested_team: Option<&str>,
+    resolved_origin: Option<&str>,
+    config: &Config,
+    interactive: bool,
+) -> Result<String, CliError> {
+    if let Some(team) = requested_team.and_then(normalize_owned) {
+        return Ok(team);
+    }
+
+    if let Some(origin) = resolved_origin {
+        if let Some(inferred_team) = infer_team_from_origin(origin) {
+            return Ok(inferred_team);
+        }
+    }
+
+    if let Some(team) = config.resolve_team(None) {
+        if let Some(normalized) = normalize_owned(&team) {
+            return Ok(normalized);
+        }
+    }
+
+    if interactive {
+        return prompt_text_input("Kibela team (tenant)");
+    }
+
+    Err(CliError::new(
+        ErrorCode::InputInvalid,
+        "team is required (--team/KIBELA_TEAM/KIBELA_TENANT or config.default_team)",
+    ))
+}
+
+fn resolve_login_token(
+    with_token: bool,
+    stdin_token: Option<&str>,
+    env_token: Option<&str>,
+    interactive: bool,
+) -> Result<(String, &'static str), CliError> {
+    if let Some(token) = stdin_token.and_then(normalize_owned) {
+        return Ok((token, "stdin"));
+    }
+    if let Some(token) = env_token.and_then(normalize_owned) {
+        return Ok((token, "env"));
+    }
+    if with_token {
+        return Err(CliError::new(
+            ErrorCode::InputInvalid,
+            "stdin token is empty",
+        ));
+    }
+    if interactive {
+        let token = prompt_secret_input("Kibela access token")?;
+        return Ok((token, "prompt"));
+    }
+    Err(CliError::new(
+        ErrorCode::InputInvalid,
+        "token is required (--with-token stdin or token env)",
+    ))
+}
+
+fn token_store_lookup_subjects(team: &str, origin: Option<&str>) -> Vec<String> {
+    let mut subjects = Vec::new();
+    if let Some(origin) = origin.and_then(normalize_origin_owned) {
+        subjects.push(token_store_subject(team, Some(&origin)));
+    }
+    if !subjects.iter().any(|subject| subject == team) {
+        subjects.push(team.to_string());
+    }
+    subjects
+}
+
+fn prompt_text_input(label: &str) -> Result<String, CliError> {
+    let mut stdout = io::stdout();
+    write!(stdout, "{label}: ").map_err(|err| {
+        CliError::new(
+            ErrorCode::TransportError,
+            format!("failed to write prompt: {err}"),
+        )
+    })?;
+    stdout.flush().map_err(|err| {
+        CliError::new(
+            ErrorCode::TransportError,
+            format!("failed to flush prompt: {err}"),
+        )
+    })?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).map_err(|err| {
+        CliError::new(
+            ErrorCode::TransportError,
+            format!("failed to read prompt input: {err}"),
+        )
+    })?;
+
+    normalize_owned(&input)
+        .ok_or_else(|| CliError::new(ErrorCode::InputInvalid, format!("{label} is empty")))
+}
+
+fn prompt_secret_input(label: &str) -> Result<String, CliError> {
+    let value = prompt_password(format!("{label}: ")).map_err(|err| {
+        CliError::new(
+            ErrorCode::TransportError,
+            format!("failed to read secret input: {err}"),
+        )
+    })?;
+    normalize_owned(&value)
+        .ok_or_else(|| CliError::new(ErrorCode::InputInvalid, format!("{label} is empty")))
+}
+
+fn prompt_origin_input() -> Result<String, CliError> {
+    let origin = prompt_text_input("Kibela origin (https://<tenant>.kibe.la)")?;
+    normalize_origin_owned(&origin).ok_or_else(|| {
+        CliError::new(
+            ErrorCode::InputInvalid,
+            "origin must start with http:// or https://",
+        )
+    })
+}
+
+fn is_interactive_terminal() -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
 fn note_folder_arg_to_input(folder: &cli::NoteFolderArg) -> CreateNoteFolderInput {
@@ -1266,6 +1521,34 @@ fn normalize_owned(value: &str) -> Option<String> {
     }
 }
 
+fn normalize_origin_owned(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.trim_end_matches('/');
+    if normalized.is_empty() {
+        return None;
+    }
+    if !(normalized.starts_with("https://") || normalized.starts_with("http://")) {
+        return None;
+    }
+    Some(normalized.to_ascii_lowercase())
+}
+
+fn infer_team_from_origin(origin: &str) -> Option<String> {
+    let normalized = normalize_origin_owned(origin)?;
+    let host_and_path = normalized.split_once("://")?.1;
+    let host = host_and_path.split('/').next()?;
+    let host = host.split(':').next()?;
+    let tenant = host.strip_suffix(".kibe.la")?;
+    if tenant.is_empty() {
+        None
+    } else {
+        Some(tenant.to_string())
+    }
+}
+
 fn generated_request_id() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1280,7 +1563,9 @@ fn generated_request_id() -> String {
 mod tests {
     use super::{
         analyze_query_shape, build_graphql_guardrails, detect_graphql_operation_kind,
-        enforce_graphql_guardrails, extract_mutation_root_fields, resolve_graphql_variables,
+        enforce_graphql_guardrails, extract_mutation_root_fields, infer_team_from_origin,
+        kibela_access_token_settings_url, normalize_origin_owned, resolve_graphql_variables,
+        search_note_mine_has_unsupported_filters, token_store_lookup_subjects,
         trusted_mutation_root_fields, GraphqlGuardrails, GraphqlOperationKind,
     };
     use crate::cli;
@@ -1396,5 +1681,86 @@ mod tests {
     fn trusted_mutation_root_fields_include_create_folder() {
         let allowed = trusted_mutation_root_fields();
         assert!(allowed.contains("createFolder"));
+    }
+
+    #[test]
+    fn mine_search_accepts_default_shape_only() {
+        let command = cli::SearchNoteArgs {
+            query: String::new(),
+            resources: vec![],
+            coediting: None,
+            updated: None,
+            group_ids: vec![],
+            user_ids: vec![],
+            mine: true,
+            folder_ids: vec![],
+            liker_ids: vec![],
+            is_archived: None,
+            sort_by: None,
+            first: Some(10),
+        };
+        assert!(!search_note_mine_has_unsupported_filters(&command));
+    }
+
+    #[test]
+    fn mine_search_rejects_additional_filters() {
+        let command = cli::SearchNoteArgs {
+            query: String::new(),
+            resources: vec!["note".to_string()],
+            coediting: None,
+            updated: None,
+            group_ids: vec![],
+            user_ids: vec![],
+            mine: true,
+            folder_ids: vec![],
+            liker_ids: vec![],
+            is_archived: None,
+            sort_by: None,
+            first: Some(10),
+        };
+        assert!(search_note_mine_has_unsupported_filters(&command));
+    }
+
+    #[test]
+    fn infer_team_from_kibela_origin() {
+        assert_eq!(
+            infer_team_from_origin("https://example.kibe.la/"),
+            Some("example".to_string())
+        );
+        assert_eq!(infer_team_from_origin("https://example.com"), None);
+    }
+
+    #[test]
+    fn normalize_origin_requires_scheme_and_removes_trailing_slash() {
+        assert_eq!(
+            normalize_origin_owned("https://SPIKESTUDIO.kibe.la/"),
+            Some("https://example.kibe.la".to_string())
+        );
+        assert_eq!(normalize_origin_owned("example.kibe.la"), None);
+    }
+
+    #[test]
+    fn token_store_lookup_subjects_include_origin_specific_and_legacy_team() {
+        let subjects =
+            token_store_lookup_subjects("example", Some("https://example.kibe.la"));
+        assert_eq!(
+            subjects,
+            vec![
+                "origin::https://example.kibe.la::team::example".to_string(),
+                "example".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn token_settings_url_uses_tenant_origin() {
+        assert_eq!(
+            kibela_access_token_settings_url("https://example.kibe.la"),
+            "https://example.kibe.la/settings/access_tokens".to_string()
+        );
+        assert_eq!(
+            kibela_access_token_settings_url("https://example.kibe.la/"),
+            "https://example.kibe.la/settings/access_tokens".to_string()
+        );
     }
 }

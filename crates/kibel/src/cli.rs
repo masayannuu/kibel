@@ -24,7 +24,13 @@ pub struct Cli {
         help = "Kibela origin URL"
     )]
     pub origin: String,
-    #[arg(long, global = true, env = "KIBELA_TEAM", help = "Team name")]
+    #[arg(
+        long,
+        visible_alias = "tenant",
+        global = true,
+        env = "KIBELA_TEAM",
+        help = "Team name (tenant); env alias KIBELA_TENANT is also supported"
+    )]
     pub team: Option<String>,
     #[arg(long, global = true, value_name = "PATH", help = "Config file path")]
     pub config_path: Option<PathBuf>,
@@ -62,7 +68,7 @@ pub enum AuthCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct AuthLoginArgs {
-    #[arg(long, help = "Team name")]
+    #[arg(long, visible_alias = "tenant", help = "Team name (tenant)")]
     pub team: Option<String>,
 }
 
@@ -123,7 +129,7 @@ pub enum SearchCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct SearchNoteArgs {
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     pub query: String,
     #[arg(long = "resource")]
     pub resources: Vec<String>,
@@ -133,6 +139,10 @@ pub struct SearchNoteArgs {
     pub updated: Option<String>,
     #[arg(long = "group-id")]
     pub group_ids: Vec<String>,
+    #[arg(long = "user-id")]
+    pub user_ids: Vec<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub mine: bool,
     #[arg(long = "folder-id")]
     pub folder_ids: Vec<String>,
     #[arg(long = "liker-id")]
@@ -635,6 +645,26 @@ mod tests {
                     assert_eq!(note.resources, vec!["note"]);
                     assert_eq!(note.group_ids, vec!["G1"]);
                     assert_eq!(note.first, Some(8));
+                    assert!(note.user_ids.is_empty());
+                    assert!(!note.mine);
+                }
+                SearchCommand::Folder(_) => panic!("expected search note command"),
+            },
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn parse_search_note_without_query_with_mine() {
+        let cli = Cli::try_parse_from(["kibel", "search", "note", "--mine"])
+            .expect("parse should succeed");
+
+        match cli.command {
+            Command::Search(args) => match args.command {
+                SearchCommand::Note(note) => {
+                    assert_eq!(note.query, "");
+                    assert!(note.mine);
+                    assert!(note.user_ids.is_empty());
                 }
                 SearchCommand::Folder(_) => panic!("expected search note command"),
             },

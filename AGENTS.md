@@ -8,6 +8,8 @@ Build and maintain a production-grade Kibela CLI + reusable Rust client library.
 
 - README.md
 - docs/implementation-policy.md
+- docs/cli-interface.md
+- docs/agent-skills.md
 - docs/architecture.md
 - docs/schema-lifecycle.md
 - docs/maintenance.md

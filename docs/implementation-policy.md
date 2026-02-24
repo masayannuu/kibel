@@ -10,6 +10,7 @@
 
 - 認証優先順位は固定: stdin (`--with-token`) > env (`KIBELA_ACCESS_TOKEN`) > keychain > config。
 - すべての失敗は `--json` モードで機械判読可能な `error.code` に正規化する。
+- 公式CLI I/F契約は `docs/cli-interface.md` を一次ソースとして維持する。
 - all-resource 契約は endpoint introspection snapshot を一次ソースにする。
 - 新規リソース追加時は `unit + stub E2E` を同時に追加する。
 - all-resource E2E は契約snapshot起点の動的GraphQL stub server検証を維持する。
