@@ -18,7 +18,15 @@ Schema contracts:
 - research/schema/resource_contracts.endpoint.snapshot.json
 - research/schema/resource_contracts.snapshot.json
 
-Primary external reference for behavior consistency:
+Endpoint snapshot refresh:
+
+- `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --token "$KIBELA_ACCESS_TOKEN"`
+
+Primary schema source:
+
+- `research/schema/resource_contracts.endpoint.snapshot.json` (derived from Kibela GraphQL endpoint introspection via `kibel-tools`)
+
+Secondary external reference for behavior consistency:
 
 - https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/kibela.ts
 - https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/schemas.ts

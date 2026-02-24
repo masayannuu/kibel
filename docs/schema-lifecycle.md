@@ -11,7 +11,7 @@
 
 ## Update procedure
 
-1. endpoint introspection snapshot を更新する（live source から手動更新）。
+1. endpoint introspection snapshot を更新する（live source から自動取得）。
 2. `createNote` 契約の変化がある場合は `create-note-contract` の snapshot/codegen を同期する。
 3. all-resource 契約の snapshot/codegen を同期する。
 4. unit/E2E を実行する。
@@ -20,6 +20,10 @@
 ## Command checklist
 
 ```bash
+# refresh endpoint snapshot from live GraphQL
+cargo run -p kibel-tools -- resource-contract refresh-endpoint \
+  --origin "$KIBELA_ORIGIN" --token "$KIBELA_ACCESS_TOKEN"
+
 # refresh contract snapshot/module from committed endpoint snapshot
 cargo run -p kibel-tools -- resource-contract write
 

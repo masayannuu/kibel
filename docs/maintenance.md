@@ -3,6 +3,7 @@
 ## Add a new resource
 
 1. endpoint introspection snapshot を更新し、ローカル契約へ反映する。
+   - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --token "$KIBELA_ACCESS_TOKEN"`
 2. `kibel-client` に入力構造体・実行メソッドを追加。
 3. `kibel` に CLI サブコマンドを追加。
 4. `--json` の出力形を固定化。
