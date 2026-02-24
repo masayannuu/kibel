@@ -17,12 +17,26 @@
 4. unit/E2E を実行する。
 5. CI 通過を確認してマージする。
 
+## Scheduled refresh
+
+- GitHub Actions `schema-refresh` workflow が定期実行される。
+- 実行内容:
+  - live endpoint から `create-note` snapshot refresh
+  - live endpoint から endpoint introspection refresh
+  - contract codegen/write
+  - contract checks + workspace checks
+  - 差分があれば PR 作成
+
 ## Command checklist
 
 ```bash
+# refresh create-note snapshot from live GraphQL
+cargo run -p kibel-tools -- create-note-contract refresh-snapshot \
+  --origin "$KIBELA_ORIGIN"
+
 # refresh endpoint snapshot from live GraphQL
 cargo run -p kibel-tools -- resource-contract refresh-endpoint \
-  --origin "$KIBELA_ORIGIN" --token "$KIBELA_ACCESS_TOKEN"
+  --origin "$KIBELA_ORIGIN"
 
 # refresh contract snapshot/module from committed endpoint snapshot
 cargo run -p kibel-tools -- resource-contract write

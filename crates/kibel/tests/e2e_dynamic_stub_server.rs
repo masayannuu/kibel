@@ -24,6 +24,7 @@ fn run_kibel_json(server: &DynamicGraphqlStubServer, args: &[&str]) -> (Output, 
         "KIBEL_TEST_TRANSPORT_ERROR",
         "KIBEL_TEST_CAPTURE_REQUEST_PATH",
         "KIBEL_DISABLE_RUNTIME_INTROSPECTION",
+        "KIBEL_ENABLE_RUNTIME_INTROSPECTION",
     ] {
         command.env_remove(key);
     }
@@ -196,14 +197,35 @@ fn all_resources_work_against_dynamic_contract_stub_server() {
     for request in &requests {
         assert_eq!(request.path, "/api/v1");
         assert!(
-            request.query.contains('{'),
-            "graphql query should include selection set"
+            request.query.is_empty() || request.query.contains('{'),
+            "graphql query should include selection set when present"
         );
         assert!(
             request.variables.is_object(),
             "graphql variables should be a JSON object"
         );
+        assert!(
+            request
+                .accept
+                .as_deref()
+                .unwrap_or("")
+                .contains("application/graphql-response+json"),
+            "graphql requests should send Accept header for graphql-response+json"
+        );
     }
+
+    let seen_methods = requests
+        .iter()
+        .map(|request| request.method.as_str())
+        .collect::<HashSet<_>>();
+    assert!(
+        seen_methods.contains("GET"),
+        "trusted query path should attempt GET transport"
+    );
+    assert!(
+        seen_methods.contains("POST"),
+        "fallback and mutation paths should use POST transport"
+    );
 
     let seen_fields = requests
         .iter()
@@ -228,7 +250,6 @@ fn all_resources_work_against_dynamic_contract_stub_server() {
         "moveNoteToAnotherFolder",
         "attachNoteToFolder",
         "updateNoteContent",
-        "__type",
     ] {
         assert!(
             seen_fields.contains(field),
@@ -256,6 +277,15 @@ fn graphql_run_query_works_with_guardrails() {
     assert_eq!(payload["ok"], Value::Bool(true));
     assert_eq!(payload["data"]["response"]["data"]["note"]["id"], "N1");
     assert_eq!(payload["data"]["meta"]["guardrails"]["timeout_secs"], 15);
+    let methods = server
+        .captured_requests()
+        .into_iter()
+        .map(|request| request.method)
+        .collect::<HashSet<_>>();
+    assert!(
+        methods.contains("POST"),
+        "graphql run query should remain on POST transport"
+    );
 }
 
 #[test]
