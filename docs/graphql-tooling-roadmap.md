@@ -20,7 +20,7 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - `graphql run` free-query lane exists with mutation opt-in and baseline guardrails.
 
 ### Current gaps
-- Schema refresh governance is still mostly operator-driven.
+- Schema refresh is automated by scheduled CI refresh, while snapshot diffs remain human-reviewed before merge.
 - Persisted-query/safelist adoption is still pending backend capability decision.
 
 ## Target Model
