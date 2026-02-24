@@ -305,3 +305,33 @@ fn graphql_run_allows_mutation_with_opt_in_flag() {
         "F-created"
     );
 }
+
+#[test]
+fn graphql_run_blocks_non_allowlisted_mutation_even_with_allow_flag() {
+    let server = DynamicGraphqlStubServer::start();
+    let (output, payload) = run_kibel_json(
+        &server,
+        &[
+            "graphql",
+            "run",
+            "--allow-mutation",
+            "--query",
+            "mutation DangerousDelete($id: ID!) { deleteNote(input: { id: $id }) { clientMutationId } }",
+            "--variables",
+            "{\"id\":\"N1\"}",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(payload["ok"], Value::Bool(false));
+    assert_eq!(payload["error"]["code"], "INPUT_INVALID");
+    assert!(payload["error"]["message"]
+        .as_str()
+        .expect("error message should be string")
+        .contains("not allowlisted"));
+
+    assert!(
+        server.captured_requests().is_empty(),
+        "blocked mutations should fail before HTTP request dispatch"
+    );
+}

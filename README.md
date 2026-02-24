@@ -49,6 +49,8 @@ kibel --json note get --id N1
 kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
+`graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
+
 ## Auth And Config Behavior
 
 Token resolution order is fixed:
