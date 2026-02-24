@@ -21,7 +21,31 @@ Kibela operations are often needed in scripts, CI, and internal tooling.
 
 ## Quick Start (CLI)
 
-### 1. Install
+### 1. Install (recommended: GitHub Release binary)
+
+Linux (`x86_64` / `aarch64`) example:
+
+```bash
+VERSION="vX.Y.Z"
+ARCH_RAW="$(uname -m)"
+case "${ARCH_RAW}" in
+  x86_64) ARCH="x86_64" ;;
+  aarch64|arm64) ARCH="aarch64" ;;
+  *) echo "unsupported arch: ${ARCH_RAW}" >&2; exit 1 ;;
+esac
+
+ASSET="kibel-${VERSION}-linux-${ARCH}.tar.gz"
+BASE_URL="https://github.com/masayannuu/kibel/releases/download/${VERSION}"
+
+curl -fL -o "${ASSET}" "${BASE_URL}/${ASSET}"
+curl -fL -o "${ASSET}.sha256" "${BASE_URL}/${ASSET}.sha256"
+sha256sum -c "${ASSET}.sha256"
+tar -xzf "${ASSET}"
+sudo install -m 0755 kibel /usr/local/bin/kibel
+kibel --version
+```
+
+### 2. Fallback install from source (Cargo)
 
 ```bash
 # install from source checkout
@@ -32,7 +56,7 @@ cargo build --release -p kibel
 ./target/release/kibel --help
 ```
 
-### 2. Set environment
+### 3. Set environment
 
 ```bash
 export KIBELA_ORIGIN="https://my-team.kibe.la"
@@ -40,7 +64,7 @@ export KIBELA_TEAM="my-team"
 export KIBELA_ACCESS_TOKEN="<your-token>"
 ```
 
-### 3. Run commands
+### 4. Run commands
 
 ```bash
 kibel --json auth status

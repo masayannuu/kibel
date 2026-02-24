@@ -25,7 +25,16 @@
 3. package 検証を実行する。
    - `cargo package --locked -p kibel-client`
 4. `README.md` と `docs/` を実装に合わせて更新する。
-5. `v*.*.*` タグを push して release workflow の成果物（tar.gz + sha256）を確認する。
-6. crates.io 公開する場合は `kibel-client` を先に publish し、index反映後に `kibel` を publish する。
-7. `kibel` publish 前に dry-run を行う。
+5. `v*.*.*` タグを push して release workflow を実行する。
+6. GitHub Release に以下成果物が揃っていることを確認する。
+   - `kibel-${VERSION}-linux-x86_64.tar.gz`
+   - `kibel-${VERSION}-linux-aarch64.tar.gz`
+   - 各 `*.sha256`
+   - `kibel-${VERSION}-checksums.txt`
+7. ダウンロード後の検証を実施する。
+   - `sha256sum -c kibel-${VERSION}-linux-x86_64.tar.gz.sha256`
+   - `sha256sum -c kibel-${VERSION}-linux-aarch64.tar.gz.sha256`
+8. release workflow の provenance attestation ステップが成功していることを確認する。
+9. crates.io 公開する場合は `kibel-client` を先に publish し、index反映後に `kibel` を publish する。
+10. `kibel` publish 前に dry-run を行う。
    - `cargo publish --dry-run -p kibel`
