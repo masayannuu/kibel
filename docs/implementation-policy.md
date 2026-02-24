@@ -13,12 +13,15 @@
 - all-resource 契約は endpoint introspection snapshot を一次ソースにする。
 - 新規リソース追加時は `unit + stub E2E` を同時に追加する。
 - all-resource E2E は契約snapshot起点の動的GraphQL stub server検証を維持する。
+- free-query 系コマンドを導入する場合も `--json` 失敗時の `error.code` 正規化を必須とする。
+- free-query 系コマンドは timeout/response size/depth-cost などの実行境界を必須で持つ。
 
 ## 2026 lifecycle policy
 
 - Schema evolution 前提で運用し、固定バージョン API 前提にはしない。
 - 変更検知は CI で fail-fast: contract 検証、生成物の stale 検証を必須化する。
 - 変更検知の主経路は CI: endpoint snapshot 起点の契約再現性を保証する。
+- trusted operation 実行モデルを優先し、ad-hoc 実行経路は明示的に分離する。
 - 互換性方針:
   - CLI 破壊的変更は避ける。
   - 互換 alias は明示管理し、移行完了後に削除計画を立てる。
