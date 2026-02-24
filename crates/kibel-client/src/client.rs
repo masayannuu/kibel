@@ -15,7 +15,7 @@ mod generated_resource_contracts;
 use self::generated_create_note_contract::{
     CREATE_NOTE_INPUT_FIELDS, CREATE_NOTE_NOTE_PROJECTION_FIELDS, CREATE_NOTE_PAYLOAD_FIELDS,
 };
-pub use self::generated_resource_contracts::ResourceContract;
+pub use self::generated_resource_contracts::{ResourceContract, TrustedOperation};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 const DEFAULT_FIRST: u32 = 16;
@@ -428,6 +428,16 @@ pub fn resource_contract_upstream_commit() -> &'static str {
     generated_resource_contracts::RESOURCE_CONTRACT_UPSTREAM_COMMIT
 }
 
+#[must_use]
+pub fn trusted_operations() -> &'static [TrustedOperation] {
+    generated_resource_contracts::TRUSTED_OPERATIONS
+}
+
+#[must_use]
+pub fn trusted_operation_contract(operation: TrustedOperation) -> &'static ResourceContract {
+    generated_resource_contracts::trusted_operation_contract(operation)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub id: String,
@@ -616,7 +626,11 @@ impl KibelClient {
             ));
         }
 
-        let payload = self.request_graphql(QUERY_NOTE_GET, json!({ "id": id }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            json!({ "id": id }),
+        )?;
         parse_note_at(&payload, "/data/note")
     }
 
@@ -710,8 +724,11 @@ impl KibelClient {
         }
 
         let mutation = schema.create_note_mutation();
-        let payload =
-            self.request_graphql(&mutation, json!({ "input": Value::Object(gql_input) }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateNote,
+            &mutation,
+            json!({ "input": Value::Object(gql_input) }),
+        )?;
         let note = parse_create_note_at(&payload, "/data/createNote/note")?;
         let client_mutation_id = payload
             .pointer("/data/createNote/clientMutationId")
@@ -750,7 +767,8 @@ impl KibelClient {
             ));
         }
 
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::UpdateNoteContent,
             MUTATION_UPDATE_NOTE_CONTENT,
             json!({
                 "input": {
@@ -810,7 +828,11 @@ impl KibelClient {
             variables.insert("sortBy".to_string(), Value::String(value));
         }
 
-        let payload = self.request_graphql(QUERY_SEARCH_NOTE, Value::Object(variables))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::SearchNote,
+            QUERY_SEARCH_NOTE,
+            Value::Object(variables),
+        )?;
         let edges = require_array_at(&payload, "/data/search/edges", "search result not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -843,7 +865,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::SearchFolder,
             QUERY_SEARCH_FOLDER,
             json!({
                 "query": query,
@@ -877,7 +900,11 @@ impl KibelClient {
     /// transport/API errors from GraphQL.
     pub fn get_groups(&self, input: PageInput) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(QUERY_GET_GROUPS, json!({ "first": first }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetGroups,
+            QUERY_GET_GROUPS,
+            json!({ "first": first }),
+        )?;
         let edges = require_array_at(&payload, "/data/groups/edges", "groups not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -899,7 +926,11 @@ impl KibelClient {
     /// transport/API errors from GraphQL.
     pub fn get_folders(&self, input: PageInput) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(QUERY_GET_FOLDERS, json!({ "first": first }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolders,
+            QUERY_GET_FOLDERS,
+            json!({ "first": first }),
+        )?;
         let edges = require_array_at(&payload, "/data/folders/edges", "folders not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -925,7 +956,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNotes,
             QUERY_GET_NOTES,
             json!({
                 "folderId": folder_id,
@@ -959,7 +991,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNoteFromPath,
             QUERY_GET_NOTE_FROM_PATH,
             json!({
                 "path": path,
@@ -982,7 +1015,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolder,
             QUERY_GET_FOLDER,
             json!({
                 "id": id,
@@ -1005,7 +1039,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolderFromPath,
             QUERY_GET_FOLDER_FROM_PATH,
             json!({
                 "path": path,
@@ -1034,7 +1069,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFeedSections,
             QUERY_GET_FEED_SECTIONS,
             json!({
                 "kind": kind,
@@ -1070,7 +1106,8 @@ impl KibelClient {
                 "note id is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateComment,
             MUTATION_CREATE_COMMENT,
             json!({
                 "input": {
@@ -1107,7 +1144,8 @@ impl KibelClient {
                 "comment id is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateCommentReply,
             MUTATION_CREATE_COMMENT_REPLY,
             json!({
                 "input": {
@@ -1144,7 +1182,8 @@ impl KibelClient {
                 "full name is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateFolder,
             MUTATION_CREATE_FOLDER,
             json!({
                 "input": {
@@ -1179,7 +1218,8 @@ impl KibelClient {
         }
         let from_folder = normalize_folder(&input.from_folder)?;
         let to_folder = normalize_folder(&input.to_folder)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::MoveNoteToAnotherFolder,
             MUTATION_MOVE_NOTE_TO_ANOTHER_FOLDER,
             json!({
                 "input": {
@@ -1212,7 +1252,8 @@ impl KibelClient {
             ));
         }
         let folder = normalize_folder(&input.folder)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::AttachNoteToFolder,
             MUTATION_ATTACH_NOTE_TO_FOLDER,
             json!({
                 "input": {
@@ -1228,7 +1269,21 @@ impl KibelClient {
         )
     }
 
-    fn request_graphql(&self, query: &str, variables: Value) -> Result<Value, KibelClientError> {
+    fn request_trusted_graphql(
+        &self,
+        operation: TrustedOperation,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value, KibelClientError> {
+        validate_trusted_operation_request(operation, query, &variables)?;
+        self.request_graphql_raw(query, variables)
+    }
+
+    fn request_graphql_raw(
+        &self,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value, KibelClientError> {
         let timeout = Duration::from_millis(self.timeout_ms.max(100));
         let payload = Value::Object(serde_json::Map::from_iter([
             ("query".to_string(), Value::String(query.to_string())),
@@ -1302,7 +1357,7 @@ impl KibelClient {
             }
         }
 
-        if let Ok(payload) = self.request_graphql(QUERY_CREATE_NOTE_SCHEMA, json!({})) {
+        if let Ok(payload) = self.request_graphql_raw(QUERY_CREATE_NOTE_SCHEMA, json!({})) {
             if let Some(schema) = CreateNoteSchema::from_introspection(&payload) {
                 if let Ok(mut guard) = self.create_note_schema.lock() {
                     *guard = Some(schema.clone());
@@ -1320,6 +1375,168 @@ fn endpoint_from_origin(origin: &str) -> String {
         normalized.to_string()
     } else {
         format!("{normalized}/api/v1")
+    }
+}
+
+fn validate_trusted_operation_request(
+    operation: TrustedOperation,
+    query: &str,
+    variables: &Value,
+) -> Result<(), KibelClientError> {
+    let contract = trusted_operation_contract(operation);
+    let expected_root = contract
+        .graphql_file
+        .rsplit('.')
+        .next()
+        .ok_or_else(|| {
+            KibelClientError::Transport(format!(
+                "invalid graphql_file format in contract: {}",
+                contract.graphql_file
+            ))
+        })?
+        .trim();
+    if expected_root.is_empty() {
+        return Err(KibelClientError::Transport(
+            "empty root field in trusted contract".to_string(),
+        ));
+    }
+
+    let actual_root = extract_root_field(query).ok_or_else(|| {
+        KibelClientError::Transport(format!(
+            "failed to extract root field for trusted operation `{}`",
+            contract.name
+        ))
+    })?;
+    if actual_root != expected_root {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` root field mismatch: expected `{}`, got `{}`",
+            contract.name, expected_root, actual_root
+        )));
+    }
+
+    let declared_variables = extract_declared_variables(query);
+    let missing_declarations = contract
+        .required_variables
+        .iter()
+        .filter(|name| !declared_variables.contains(**name))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_declarations.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` required variable(s) are not declared in query: {}",
+            contract.name,
+            missing_declarations.join(", ")
+        )));
+    }
+
+    let object = variables.as_object().ok_or_else(|| {
+        KibelClientError::Transport(format!(
+            "trusted operation `{}` requires JSON object variables",
+            contract.name
+        ))
+    })?;
+
+    let missing_required = contract
+        .required_variables
+        .iter()
+        .filter(|name| object.get(**name).is_none_or(Value::is_null))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_required.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` missing required variable(s): {}",
+            contract.name,
+            missing_required.join(", ")
+        )));
+    }
+
+    let unsupported = object
+        .keys()
+        .filter(|name| !declared_variables.contains(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unsupported.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` has undeclared variable(s): {}",
+            contract.name,
+            unsupported.join(", ")
+        )));
+    }
+
+    Ok(())
+}
+
+fn extract_root_field(query: &str) -> Option<String> {
+    let start = query.find('{')? + 1;
+    let bytes = query.as_bytes();
+    let mut index = start;
+
+    skip_whitespace(bytes, &mut index);
+    let mut field = read_identifier(bytes, &mut index)?;
+    skip_whitespace(bytes, &mut index);
+
+    if bytes.get(index).copied() == Some(b':') {
+        index += 1;
+        skip_whitespace(bytes, &mut index);
+        field = read_identifier(bytes, &mut index)?;
+    }
+
+    Some(field)
+}
+
+fn extract_declared_variables(query: &str) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    let header_end = query.find('{').unwrap_or(query.len());
+    let bytes = query.as_bytes();
+    let mut index = 0;
+
+    while index < header_end {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        let start = index;
+        while index < header_end {
+            let c = bytes[index];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        if index > start {
+            if let Ok(name) = std::str::from_utf8(&bytes[start..index]) {
+                set.insert(name.to_string());
+            }
+        }
+    }
+
+    set
+}
+
+fn skip_whitespace(bytes: &[u8], index: &mut usize) {
+    while *index < bytes.len() && bytes[*index].is_ascii_whitespace() {
+        *index += 1;
+    }
+}
+
+fn read_identifier(bytes: &[u8], index: &mut usize) -> Option<String> {
+    let start = *index;
+    while *index < bytes.len() {
+        let c = bytes[*index];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            *index += 1;
+        } else {
+            break;
+        }
+    }
+    if *index == start {
+        None
+    } else {
+        std::str::from_utf8(&bytes[start..*index])
+            .ok()
+            .map(str::to_string)
     }
 }
 
@@ -1659,10 +1876,12 @@ fn collect_name_set(value: &Value) -> BTreeSet<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_name_set, endpoint_from_origin, extract_graphql_error,
+        collect_name_set, endpoint_from_origin, extract_graphql_error, extract_root_field,
         load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
         resource_contract_version, resource_contracts, should_skip_runtime_introspection,
-        CreateNoteInput, CreateNoteSchema, KibelClient,
+        trusted_operation_contract, trusted_operations, validate_trusted_operation_request,
+        CreateNoteInput, CreateNoteSchema, KibelClient, TrustedOperation, QUERY_GET_FOLDER,
+        QUERY_NOTE_GET,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -1839,6 +2058,97 @@ mod tests {
             .iter()
             .all(|item| item.graphql_file.starts_with("endpoint:")));
         assert_eq!(resource_contract_upstream_commit(), "");
+    }
+
+    #[test]
+    fn trusted_operations_cover_all_resource_contracts() {
+        let operations = trusted_operations();
+        let contracts = resource_contracts();
+        assert_eq!(operations.len(), contracts.len());
+        for operation in operations {
+            let contract = trusted_operation_contract(*operation);
+            assert!(contracts.iter().any(|item| item.name == contract.name));
+        }
+    }
+
+    #[test]
+    fn extract_root_field_supports_alias() {
+        let query = r#"
+query AliasQuery($id: ID!) {
+  item: note(id: $id) {
+    id
+  }
+}
+"#;
+        let root = extract_root_field(query).expect("root should be parsed");
+        assert_eq!(root, "note");
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_missing_required_variable() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            &json!({}),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("missing required variable(s): id"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_unsupported_variable() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            &json!({
+                "id": "N1",
+                "first": 16,
+            }),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("undeclared variable(s): first"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trusted_operation_validation_allows_declared_non_root_variables() {
+        validate_trusted_operation_request(
+            TrustedOperation::GetFolder,
+            QUERY_GET_FOLDER,
+            &json!({
+                "id": "F1",
+                "first": 1,
+            }),
+        )
+        .expect("validation should accept declared variable");
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_root_field_mismatch() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_GET_FOLDER,
+            &json!({
+                "id": "F1",
+                "first": 1,
+            }),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("root field mismatch"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

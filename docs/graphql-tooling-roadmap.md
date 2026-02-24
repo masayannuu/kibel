@@ -16,9 +16,9 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Deterministic contract checks for snapshot + generated modules.
 - Dynamic GraphQL stub E2E based on committed contracts.
 - Runtime schema adaptation path for createNote.
+- Built-in operations are executed through generated trusted operation registry with runtime validation.
 
 ### Current gaps
-- Built-in operations are not yet managed as a formal trusted-doc registry.
 - No explicit untrusted free-query lane with guardrails.
 - Schema refresh governance is still mostly operator-driven.
 - Free-query lane contract (JSON error normalization) is not yet specified.
