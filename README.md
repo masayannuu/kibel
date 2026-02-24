@@ -139,7 +139,7 @@ Origin and team resolution:
 - Missing fields are prompted interactively on TTY (origin/team/token).
 - Token storage is tenant-origin aware in keychain, with legacy team fallback for compatibility.
 - Config profile also stores token/origin so server environments can run without keychain.
-- Token settings URL shown in login result: `<origin>/settings/access_tokens` (example: `https://spikestudio.kibe.la/settings/access_tokens`)
+- Token settings URL shown in login result: `<origin>/settings/access_tokens` (example: `https://example.kibe.la/settings/access_tokens`)
 
 If origin cannot be resolved, commands fail with `INPUT_INVALID`.
 
