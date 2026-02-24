@@ -15,6 +15,8 @@
 - all-resource E2E は契約snapshot起点の動的GraphQL stub server検証を維持する。
 - free-query 系コマンドを導入する場合も `--json` 失敗時の `error.code` 正規化を必須とする。
 - free-query 系コマンドは timeout/response size/depth-cost などの実行境界を必須で持つ。
+- CLI 機能スコープは明示的に制限し、破壊的/管理者系操作（delete、member add/remove、organization/group setting 変更）は現時点で提供しない。
+- 破壊的/管理者系操作向けの `--dangerous` などのバイパスフラグは現リリースで提供しない。
 
 ## 2026 lifecycle policy
 
@@ -31,3 +33,4 @@
 - トークンは stdout に出力しない。
 - テスト専用環境変数による transport override は実行モードで明確に分離する。
 - 破壊的操作系 (`create*`, `move*`, `attach*`, `update*`) は、endpoint が提供する idempotency/precondition 入力を優先して公開し、request shape テストで維持する。
+- `graphql run` の mutation は `--allow-mutation` かつ trusted contract allowlist を満たすものだけ許可し、allowlist 外は通信前に拒否する。
