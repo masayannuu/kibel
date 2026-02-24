@@ -1,0 +1,10 @@
+<svg viewBox="0 0 500 120" width="500" height="120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kibel logo">
+  <g transform="translate(10, 10)">
+    <rect width="100" height="100" rx="24" fill="rgb(40, 101, 181)" />
+    <rect x="25" y="18" width="50" height="64" rx="6" stroke="white" stroke-width="8" fill="none" />
+    <path d="M 37 40 L 49 50 L 37 60" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <line x1="53" y1="64" x2="63" y2="64" stroke="white" stroke-width="8" stroke-linecap="round" />
+  </g>
+  <text x="130" y="85" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="64" fill="#1f2937" letter-spacing="-1.5">kibel</text>
+  <text x="290" y="85" font-family="Fira Code, ui-monospace, monospace" font-weight="500" font-size="64" fill="rgb(40, 101, 181)">_</text>
+</svg>
