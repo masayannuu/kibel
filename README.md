@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" width="420" height="100" alt="kibel logo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" width="420" height="100" alt="kibel logo">
+  </picture>
 </p>
 
 # kibel
