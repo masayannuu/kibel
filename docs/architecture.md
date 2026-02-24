@@ -36,4 +36,5 @@
 - モデルは「必要十分」: CLIで利用するフィールドだけを厳選し、過剰な静的型を避ける。
 - 契約管理は endpoint snapshot 起点の単一路線:
   - CI基準: endpoint introspection snapshot から作る snapshot/codegen
+  - refresh: `kibel-tools resource-contract refresh-endpoint`
 - 仕様差異がある場合は runtime introspection か fallback contract で吸収する（現在 createNote）。
