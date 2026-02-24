@@ -43,7 +43,7 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Mandatory request timeout.
 - Response-size limit and strict JSON output mode.
 - Depth/cost budget checks are mandatory when schema metadata allows; otherwise fail-closed policy is required.
-- Sensitive-field denylist policy hook (future phase).
+- Mutation root-field allowlist derived from trusted resource contracts (enabled).
 - Error contract parity with built-in commands:
   - `--json` failures must always produce normalized `error.code`.
 
@@ -53,6 +53,7 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Max depth: 8.
 - Max complexity budget: 1000 (if complexity metadata unavailable, reject unless `--unsafe-no-cost-check` is explicitly set).
 - Mutations in free-query lane require explicit `--allow-mutation`.
+- Mutations in free-query lane are restricted to trusted contract mutation roots.
 
 ## Architecture (Target)
 

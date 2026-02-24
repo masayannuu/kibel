@@ -5,14 +5,15 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use error::{CliError, ErrorCode};
 use kibel_client::{
-    default_config_path, require_team, resolve_access_token, token_source_label,
-    AttachNoteToFolderInput, Config, CreateCommentInput, CreateCommentReplyInput,
-    CreateFolderInput, CreateNoteFolderInput, CreateNoteInput, FeedSectionsInput,
-    FolderLookupInput, GetNotesInput, KeychainTokenStore, KibelClient,
+    default_config_path, require_team, resolve_access_token, resource_contracts,
+    token_source_label, AttachNoteToFolderInput, Config, CreateCommentInput,
+    CreateCommentReplyInput, CreateFolderInput, CreateNoteFolderInput, CreateNoteInput,
+    FeedSectionsInput, FolderLookupInput, GetNotesInput, KeychainTokenStore, KibelClient,
     MoveNoteToAnotherFolderInput, PageInput, PathLookupInput, ResolveTokenInput, SearchFolderInput,
     SearchNoteInput, TokenStore, UpdateNoteInput,
 };
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -828,13 +829,14 @@ fn enforce_graphql_guardrails(
         ));
     }
 
-    if detect_graphql_operation_kind(query) == Some(GraphqlOperationKind::Mutation)
-        && !guardrails.allow_mutation
-    {
-        return Err(CliError::new(
-            ErrorCode::InputInvalid,
-            "mutation is blocked in graphql run mode; pass --allow-mutation to execute",
-        ));
+    if detect_graphql_operation_kind(query) == Some(GraphqlOperationKind::Mutation) {
+        if !guardrails.allow_mutation {
+            return Err(CliError::new(
+                ErrorCode::InputInvalid,
+                "mutation is blocked in graphql run mode; pass --allow-mutation to execute",
+            ));
+        }
+        enforce_mutation_allowlist(query)?;
     }
 
     match analyze_query_shape(query) {
@@ -871,6 +873,160 @@ fn enforce_graphql_guardrails(
     }
 
     Ok(())
+}
+
+fn enforce_mutation_allowlist(query: &str) -> Result<(), CliError> {
+    let mutation_root_fields = extract_mutation_root_fields(query)
+        .map_err(|error| CliError::new(ErrorCode::InputInvalid, error))?;
+    let allowed_roots = trusted_mutation_root_fields();
+    let mut blocked_roots = mutation_root_fields
+        .iter()
+        .filter(|field| !allowed_roots.contains(field.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if blocked_roots.is_empty() {
+        return Ok(());
+    }
+
+    blocked_roots.sort();
+    blocked_roots.dedup();
+
+    let mut allowed_sorted = allowed_roots.iter().copied().collect::<Vec<_>>();
+    allowed_sorted.sort_unstable();
+    Err(CliError::new(
+        ErrorCode::InputInvalid,
+        format!(
+            "mutation root field(s) are not allowlisted for graphql run: {}; allowed fields: {}",
+            blocked_roots.join(", "),
+            allowed_sorted.join(", ")
+        ),
+    ))
+}
+
+fn trusted_mutation_root_fields() -> HashSet<&'static str> {
+    resource_contracts()
+        .iter()
+        .filter(|contract| contract.kind == "mutation")
+        .filter_map(|contract| {
+            contract
+                .graphql_file
+                .strip_prefix("endpoint:mutation.")
+                .filter(|field| !field.is_empty())
+        })
+        .collect()
+}
+
+fn extract_mutation_root_fields(query: &str) -> Result<Vec<String>, String> {
+    let bytes = query.as_bytes();
+    let mut index = 0usize;
+    let mut depth = 0u32;
+    let mut paren_depth = 0u32;
+    let mut in_comment = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut roots = Vec::new();
+
+    while index < bytes.len() {
+        let c = bytes[index];
+        if in_comment {
+            if c == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        match c {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'"' => {
+                in_string = true;
+                index += 1;
+            }
+            b'(' => {
+                paren_depth = paren_depth.saturating_add(1);
+                index += 1;
+            }
+            b')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'{' => {
+                depth = depth.saturating_add(1);
+                index += 1;
+            }
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                index += 1;
+            }
+            _ if depth == 1 && paren_depth == 0 && is_identifier_start(c) => {
+                let field_or_alias = read_identifier_token(bytes, &mut index)?;
+                skip_graphql_whitespace_and_comments(bytes, &mut index);
+                let resolved_field = if index < bytes.len() && bytes[index] == b':' {
+                    index += 1;
+                    skip_graphql_whitespace_and_comments(bytes, &mut index);
+                    if index >= bytes.len() || !is_identifier_start(bytes[index]) {
+                        return Err("invalid alias syntax in mutation selection set".to_string());
+                    }
+                    read_identifier_token(bytes, &mut index)?
+                } else {
+                    field_or_alias
+                };
+                if !is_graphql_keyword(&resolved_field) {
+                    roots.push(resolved_field);
+                }
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    if roots.is_empty() {
+        return Err("mutation must include at least one top-level root field".to_string());
+    }
+    Ok(roots)
+}
+
+fn read_identifier_token(bytes: &[u8], index: &mut usize) -> Result<String, String> {
+    let start = *index;
+    while *index < bytes.len() && is_identifier_continue(bytes[*index]) {
+        *index += 1;
+    }
+    std::str::from_utf8(&bytes[start..*index])
+        .map(str::to_string)
+        .map_err(|_| "query contains non-utf8 identifier token".to_string())
+}
+
+fn skip_graphql_whitespace_and_comments(bytes: &[u8], index: &mut usize) {
+    while *index < bytes.len() {
+        if bytes[*index].is_ascii_whitespace() {
+            *index += 1;
+            continue;
+        }
+        if bytes[*index] == b'#' {
+            *index += 1;
+            while *index < bytes.len() && bytes[*index] != b'\n' {
+                *index += 1;
+            }
+            continue;
+        }
+        break;
+    }
 }
 
 fn detect_graphql_operation_kind(query: &str) -> Option<GraphqlOperationKind> {
@@ -1124,8 +1280,8 @@ fn generated_request_id() -> String {
 mod tests {
     use super::{
         analyze_query_shape, build_graphql_guardrails, detect_graphql_operation_kind,
-        enforce_graphql_guardrails, resolve_graphql_variables, GraphqlGuardrails,
-        GraphqlOperationKind,
+        enforce_graphql_guardrails, extract_mutation_root_fields, resolve_graphql_variables,
+        trusted_mutation_root_fields, GraphqlGuardrails, GraphqlOperationKind,
     };
     use crate::cli;
     use serde_json::json;
@@ -1200,5 +1356,45 @@ mod tests {
             guardrails,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mutation_root_fields_supports_alias() {
+        let fields = extract_mutation_root_fields(
+            "mutation M($input: CreateFolderInput!) { aliasCreate: createFolder(input: $input) { folder { id } } }",
+        )
+        .expect("alias mutation should parse");
+        assert_eq!(fields, vec!["createFolder".to_string()]);
+    }
+
+    #[test]
+    fn enforce_graphql_guardrails_blocks_untrusted_mutation_field() {
+        let guardrails = GraphqlGuardrails {
+            timeout_secs: 15,
+            response_limit_bytes: 2 * 1024 * 1024,
+            max_depth: 8,
+            max_complexity: 1000,
+            allow_mutation: true,
+            unsafe_no_cost_check: false,
+        };
+        let result = enforce_graphql_guardrails(
+            "mutation Dangerous($id: ID!) { deleteNote(input: { id: $id }) { clientMutationId } }",
+            &json!({ "id": "N1" }),
+            guardrails,
+        );
+        let error = result.expect_err("untrusted mutation root should be blocked");
+        assert!(
+            error
+                .message
+                .contains("not allowlisted for graphql run: deleteNote"),
+            "unexpected error message: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn trusted_mutation_root_fields_include_create_folder() {
+        let allowed = trusted_mutation_root_fields();
+        assert!(allowed.contains("createFolder"));
     }
 }
