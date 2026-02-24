@@ -24,6 +24,7 @@ const DEFAULT_FIRST: u32 = 16;
 const GRAPHQL_ACCEPT_HEADER: &str = "application/graphql-response+json, application/json;q=0.9";
 const APQ_VERSION: u64 = 1;
 const APQ_GET_VARIABLES_LIMIT_BYTES: usize = 1024;
+const SEARCH_NOTE_RESOURCE_KINDS: [&str; 3] = ["NOTE", "COMMENT", "ATTACHMENT"];
 
 const QUERY_NOTE_GET: &str = r"
 query NoteGet($id: ID!) {
@@ -62,6 +63,7 @@ query SearchNote(
   $coediting: Boolean
   $updated: SearchDate
   $groupIds: [ID!]
+  $userIds: [ID!]
   $folderIds: [ID!]
   $likerIds: [ID!]
   $isArchived: Boolean
@@ -74,6 +76,7 @@ query SearchNote(
     coediting: $coediting
     updated: $updated
     groupIds: $groupIds
+    userIds: $userIds
     folderIds: $folderIds
     likerIds: $likerIds
     isArchived: $isArchived
@@ -94,6 +97,37 @@ query SearchNote(
         author {
           account
           realName
+        }
+      }
+    }
+  }
+}
+";
+
+const QUERY_CURRENT_USER_ID: &str = r"
+query GetCurrentUserId {
+  currentUser {
+    id
+  }
+}
+";
+
+const QUERY_CURRENT_USER_LATEST_NOTES: &str = r"
+query GetCurrentUserLatestNotes($first: Int!) {
+  currentUser {
+    latestNotes(first: $first) {
+      edges {
+        node {
+          id
+          title
+          url
+          updatedAt
+          contentSummaryHtml
+          path
+          author {
+            account
+            realName
+          }
         }
       }
     }
@@ -489,6 +523,7 @@ pub struct SearchNoteInput {
     pub coediting: Option<bool>,
     pub updated: Option<String>,
     pub group_ids: Vec<String>,
+    pub user_ids: Vec<String>,
     pub folder_ids: Vec<String>,
     pub liker_ids: Vec<String>,
     pub is_archived: Option<bool>,
@@ -833,49 +868,11 @@ impl KibelClient {
     /// Searches notes.
     ///
     /// # Errors
-    /// Returns [`KibelClientError::InputInvalid`] when query/paging is invalid,
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
     /// or transport/API errors from GraphQL.
     pub fn search_note(&self, input: &SearchNoteInput) -> Result<Value, KibelClientError> {
-        let query = input.query.trim();
-        if query.is_empty() {
-            return Err(KibelClientError::InputInvalid(
-                "query is required".to_string(),
-            ));
-        }
         let first = normalize_first(input.first)?;
-
-        let mut variables = serde_json::Map::new();
-        variables.insert("query".to_string(), Value::String(query.to_string()));
-        variables.insert("first".to_string(), json!(first));
-
-        let resources = normalize_vec(&input.resources);
-        if !resources.is_empty() {
-            variables.insert("resources".to_string(), json!(resources));
-        }
-        if let Some(value) = input.coediting {
-            variables.insert("coediting".to_string(), Value::Bool(value));
-        }
-        if let Some(value) = input.updated.as_deref().and_then(normalize_optional) {
-            variables.insert("updated".to_string(), Value::String(value));
-        }
-        let group_ids = normalize_vec(&input.group_ids);
-        if !group_ids.is_empty() {
-            variables.insert("groupIds".to_string(), json!(group_ids));
-        }
-        let folder_ids = normalize_vec(&input.folder_ids);
-        if !folder_ids.is_empty() {
-            variables.insert("folderIds".to_string(), json!(folder_ids));
-        }
-        let liker_ids = normalize_vec(&input.liker_ids);
-        if !liker_ids.is_empty() {
-            variables.insert("likerIds".to_string(), json!(liker_ids));
-        }
-        if let Some(value) = input.is_archived {
-            variables.insert("isArchived".to_string(), Value::Bool(value));
-        }
-        if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
-            variables.insert("sortBy".to_string(), Value::String(value));
-        }
+        let variables = build_search_note_variables(input, first)?;
 
         let payload = self.request_trusted_graphql(
             TrustedOperation::SearchNote,
@@ -890,6 +887,61 @@ impl KibelClient {
                 "id": node.pointer("/document/id").cloned().unwrap_or(Value::Null),
                 "title": node.get("title").cloned().unwrap_or(Value::Null),
                 "url": node.get("url").cloned().unwrap_or(Value::Null),
+                "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
+                "path": node.get("path").cloned().unwrap_or(Value::Null),
+                "author": {
+                    "account": node.pointer("/author/account").cloned().unwrap_or(Value::Null),
+                    "realName": node.pointer("/author/realName").cloned().unwrap_or(Value::Null),
+                }
+            }));
+        }
+        Ok(Value::Array(items))
+    }
+
+    /// Returns the current authenticated user id.
+    ///
+    /// # Errors
+    /// Returns transport/API errors from GraphQL, or [`KibelClientError::Api`]
+    /// when the current user payload is unavailable.
+    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
+        let payload = self.run_untrusted_graphql(
+            QUERY_CURRENT_USER_ID,
+            json!({}),
+            self.timeout_ms,
+            128 * 1024,
+        )?;
+        parse_current_user_id(&payload)
+    }
+
+    /// Returns latest notes for the current authenticated user.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn get_current_user_latest_notes(
+        &self,
+        input: PageInput,
+    ) -> Result<Value, KibelClientError> {
+        let first = normalize_first(input.first)?;
+        let payload = self.run_untrusted_graphql(
+            QUERY_CURRENT_USER_LATEST_NOTES,
+            json!({ "first": first }),
+            self.timeout_ms,
+            2 * 1024 * 1024,
+        )?;
+        let edges = require_array_at(
+            &payload,
+            "/data/currentUser/latestNotes/edges",
+            "current user latest notes not found",
+        )?;
+        let mut items = Vec::with_capacity(edges.len());
+        for edge in edges {
+            let node = edge.get("node").unwrap_or(&Value::Null);
+            items.push(json!({
+                "id": node.get("id").cloned().unwrap_or(Value::Null),
+                "title": node.get("title").cloned().unwrap_or(Value::Null),
+                "url": node.get("url").cloned().unwrap_or(Value::Null),
+                "updatedAt": node.get("updatedAt").cloned().unwrap_or(Value::Null),
                 "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
                 "path": node.get("path").cloned().unwrap_or(Value::Null),
                 "author": {
@@ -1880,6 +1932,84 @@ fn require_value_at(
     Ok(value)
 }
 
+fn parse_current_user_id(payload: &Value) -> Result<String, KibelClientError> {
+    let user = require_value_at(payload, "/data/currentUser", "current user not found")?;
+    let id = user
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| KibelClientError::Api {
+            code: "NOT_FOUND".to_string(),
+            message: "current user id not found".to_string(),
+        })?;
+    Ok(id.to_string())
+}
+
+fn build_search_note_variables(
+    input: &SearchNoteInput,
+    first: u32,
+) -> Result<serde_json::Map<String, Value>, KibelClientError> {
+    let mut variables = serde_json::Map::new();
+    variables.insert(
+        "query".to_string(),
+        Value::String(input.query.trim().to_string()),
+    );
+    variables.insert("first".to_string(), json!(first));
+
+    let resources = normalize_search_note_resources(&input.resources)?;
+    if resources.is_empty() {
+        variables.insert("resources".to_string(), json!(["NOTE"]));
+    } else {
+        variables.insert("resources".to_string(), json!(resources));
+    }
+    if let Some(value) = input.coediting {
+        variables.insert("coediting".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = input.updated.as_deref().and_then(normalize_optional) {
+        variables.insert("updated".to_string(), Value::String(value));
+    }
+    let group_ids = normalize_vec(&input.group_ids);
+    if !group_ids.is_empty() {
+        variables.insert("groupIds".to_string(), json!(group_ids));
+    }
+    let user_ids = normalize_vec(&input.user_ids);
+    if !user_ids.is_empty() {
+        variables.insert("userIds".to_string(), json!(user_ids));
+    }
+    let folder_ids = normalize_vec(&input.folder_ids);
+    if !folder_ids.is_empty() {
+        variables.insert("folderIds".to_string(), json!(folder_ids));
+    }
+    let liker_ids = normalize_vec(&input.liker_ids);
+    if !liker_ids.is_empty() {
+        variables.insert("likerIds".to_string(), json!(liker_ids));
+    }
+    if let Some(value) = input.is_archived {
+        variables.insert("isArchived".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
+        variables.insert("sortBy".to_string(), Value::String(value));
+    }
+    Ok(variables)
+}
+
+fn normalize_search_note_resources(resources: &[String]) -> Result<Vec<String>, KibelClientError> {
+    let normalized = normalize_vec(resources)
+        .into_iter()
+        .map(|value| value.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    for value in &normalized {
+        if !SEARCH_NOTE_RESOURCE_KINDS.contains(&value.as_str()) {
+            return Err(KibelClientError::InputInvalid(format!(
+                "resource must be one of: {}",
+                SEARCH_NOTE_RESOURCE_KINDS.join(", ")
+            )));
+        }
+    }
+    Ok(normalized)
+}
+
 fn extract_graphql_error(payload: &Value) -> Option<(String, String)> {
     let first = payload
         .get("errors")
@@ -2146,13 +2276,13 @@ fn collect_name_set(value: &Value) -> BTreeSet<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_name_set, endpoint_from_origin, extract_graphql_error, extract_root_field,
-        is_persisted_query_not_found, is_persisted_query_not_supported,
-        load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
-        resource_contract_version, resource_contracts, should_fallback_apq_status,
-        should_skip_runtime_introspection, trusted_operation_contract, trusted_operations,
-        validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema, KibelClient,
-        TrustedOperation, QUERY_GET_FOLDER, QUERY_NOTE_GET,
+        build_search_note_variables, collect_name_set, endpoint_from_origin, extract_graphql_error,
+        extract_root_field, is_persisted_query_not_found, is_persisted_query_not_supported,
+        load_schema_fixture_from_env, parse_create_note_at, parse_current_user_id,
+        resource_contract_upstream_commit, resource_contract_version, resource_contracts,
+        should_fallback_apq_status, should_skip_runtime_introspection, trusted_operation_contract,
+        trusted_operations, validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema,
+        KibelClient, SearchNoteInput, TrustedOperation, QUERY_GET_FOLDER, QUERY_NOTE_GET,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -2507,5 +2637,111 @@ query AliasQuery($id: ID!) {
             json!(["G1", "G2"])
         );
         std::env::remove_var("KIBEL_TEST_CAPTURE_REQUEST_PATH");
+    }
+
+    #[test]
+    fn build_search_note_variables_defaults_resource_to_note() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "".to_string(),
+                resources: vec![],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("query"), Some(&json!("")));
+        assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_normalizes_user_ids() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec!["note".to_string()],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![" U1 ".to_string(), " ".to_string(), "U2".to_string()],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
+        assert_eq!(variables.get("userIds"), Some(&json!(["U1", "U2"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_rejects_unknown_resource() {
+        let error = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec!["unknown".to_string()],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect_err("unknown resource must fail");
+        match error {
+            super::KibelClientError::InputInvalid(message) => {
+                assert_eq!(
+                    message,
+                    "resource must be one of: NOTE, COMMENT, ATTACHMENT"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_current_user_id_accepts_valid_payload() {
+        let id = parse_current_user_id(&json!({
+            "data": {
+                "currentUser": {
+                    "id": " U1 "
+                }
+            }
+        }))
+        .expect("current user id should parse");
+        assert_eq!(id, "U1");
+    }
+
+    #[test]
+    fn parse_current_user_id_rejects_missing_id() {
+        let error = parse_current_user_id(&json!({
+            "data": {
+                "currentUser": {}
+            }
+        }))
+        .expect_err("missing current user id should fail");
+        match error {
+            super::KibelClientError::Api { code, message } => {
+                assert_eq!(code, "NOT_FOUND");
+                assert_eq!(message, "current user id not found");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

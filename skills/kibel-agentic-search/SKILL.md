@@ -1,0 +1,104 @@
+---
+name: kibel-agentic-search
+description: Use this skill for fast and precise Kibela note retrieval via the official kibel CLI interfaces.
+allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(jq:*)
+---
+
+# kibel Agentic Search
+
+## When to use this
+
+- User asks to find relevant Kibela notes quickly.
+- User needs recent notes from self or specific users.
+- User needs query + filter narrowing with reproducible CLI commands.
+
+## Do not use this for
+
+- Creating/updating/moving notes.
+- Member/admin/destructive operations.
+
+## Preflight (required)
+
+```bash
+KBIN="${KIBEL_BIN:-kibel}"
+if [[ "${KBIN}" == */* ]]; then
+  [[ -x "${KBIN}" ]] || { echo "kibel binary not executable: ${KBIN}" >&2; exit 127; }
+elif ! command -v "${KBIN}" >/dev/null 2>&1; then
+  echo "kibel not found in PATH (or set KIBEL_BIN)" >&2
+  exit 127
+fi
+
+"${KBIN}" --json auth status
+```
+
+Proceed only if `ok: true`.
+
+## Core retrieval flows
+
+### 1. Mine latest (high precision, low latency)
+
+```bash
+"${KBIN}" --json search note --mine --first 10
+```
+
+Use this when user intent is "my latest docs", "what I wrote recently", or "my notes list".
+
+### 2. Broad recall
+
+```bash
+"${KBIN}" --json search note --query "<query>" --first 16
+```
+
+### 3. Precision narrowing
+
+```bash
+"${KBIN}" --json search note \
+  --query "<query>" \
+  --user-id "<USER_ID>" \
+  --group-id "<GROUP_ID>" \
+  --folder-id "<FOLDER_ID>" \
+  --first 16
+```
+
+Notes:
+
+- `--query` can be empty for filter-first retrieval.
+- if `--resource` is omitted, `NOTE` is used by default.
+- `--mine` is exclusive and cannot be combined with other search filters.
+
+## Verification step (optional but recommended)
+
+Use result `id` or `path` to validate top hits:
+
+```bash
+"${KBIN}" --json note get --id "<NOTE_ID>"
+"${KBIN}" --json note get-from-path --path "/notes/<number>"
+```
+
+## Output contract (agent response)
+
+Always return:
+
+1. query/filters used
+2. top matches with title + URL + reason
+3. unknowns/gaps
+
+Example format:
+
+```text
+Search basis:
+- query: onboarding
+- filters: user-id=U1, group-id=G1
+
+Top matches:
+1. <title> (<url>) - <why relevant>
+2. <title> (<url>) - <why relevant>
+
+Unknowns:
+- <missing context or ambiguous terms>
+```
+
+## References and templates
+
+- `references/commands.md`: compact command cookbook.
+- `templates/recall_precision_loop.sh`: one-shot query recall runner.

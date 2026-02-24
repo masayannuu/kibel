@@ -5,8 +5,8 @@ pub mod error;
 pub mod store;
 
 pub use auth::{
-    require_team, resolve_access_token, token_source_label, ResolveTokenInput, TokenResolution,
-    TokenSource,
+    require_team, resolve_access_token, token_source_label, token_store_subject, ResolveTokenInput,
+    TokenResolution, TokenSource,
 };
 pub use client::{
     resource_contract_upstream_commit, resource_contract_version, resource_contracts,

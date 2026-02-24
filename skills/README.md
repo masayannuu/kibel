@@ -1,0 +1,34 @@
+# kibel Official Skills
+
+This directory contains official agent skills for `kibel`.
+
+## Available skills
+
+- `kibel-agentic-search`
+- `kibel-agentic-rag`
+- `kibel-cli-operator`
+
+## Quick install (Codex)
+
+```bash
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
+  --repo masayannuu/kibel \
+  --path skills/kibel-agentic-search \
+  --path skills/kibel-agentic-rag \
+  --path skills/kibel-cli-operator
+```
+
+Restart Codex after installation.
+
+## Manual use (Codex / Claude Code)
+
+Open each `SKILL.md` and execute the workflow as-is:
+
+- `skills/kibel-agentic-search/SKILL.md`
+- `skills/kibel-agentic-rag/SKILL.md`
+- `skills/kibel-cli-operator/SKILL.md`
+
+## Runtime expectation
+
+- Official skills target distributed binaries: `kibel` must be available in `PATH`.
+- If your environment uses a custom install location, set `KIBEL_BIN=/absolute/path/to/kibel`.
