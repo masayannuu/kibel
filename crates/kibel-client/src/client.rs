@@ -1,6 +1,7 @@
 use crate::error::KibelClientError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::fs;
@@ -20,6 +21,9 @@ pub use self::generated_resource_contracts::{ResourceContract, TrustedOperation}
 
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 const DEFAULT_FIRST: u32 = 16;
+const GRAPHQL_ACCEPT_HEADER: &str = "application/graphql-response+json, application/json;q=0.9";
+const APQ_VERSION: u64 = 1;
+const APQ_GET_VARIABLES_LIMIT_BYTES: usize = 1024;
 
 const QUERY_NOTE_GET: &str = r"
 query NoteGet($id: ID!) {
@@ -574,6 +578,18 @@ pub struct KibelClient {
     create_note_schema: Arc<Mutex<Option<CreateNoteSchema>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryTransportMode {
+    PostOnly,
+    TrustedQueryApqGet,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedGraphqlResponse {
+    payload: Value,
+    status_code: Option<u16>,
+}
+
 impl KibelClient {
     /// Builds a client for a Kibela origin and access token.
     ///
@@ -642,6 +658,7 @@ impl KibelClient {
             variables,
             timeout_ms.max(100),
             Some(max_response_bytes),
+            QueryTransportMode::PostOnly,
         )
     }
 
@@ -1308,7 +1325,11 @@ impl KibelClient {
         variables: Value,
     ) -> Result<Value, KibelClientError> {
         validate_trusted_operation_request(operation, query, &variables)?;
-        self.request_graphql_raw(query, variables)
+        let mode = match trusted_operation_contract(operation).kind {
+            "query" => QueryTransportMode::TrustedQueryApqGet,
+            _ => QueryTransportMode::PostOnly,
+        };
+        self.request_graphql_raw_with_limits(query, variables, self.timeout_ms, None, mode)
     }
 
     fn request_graphql_raw(
@@ -1316,7 +1337,13 @@ impl KibelClient {
         query: &str,
         variables: Value,
     ) -> Result<Value, KibelClientError> {
-        self.request_graphql_raw_with_limits(query, variables, self.timeout_ms, None)
+        self.request_graphql_raw_with_limits(
+            query,
+            variables,
+            self.timeout_ms,
+            None,
+            QueryTransportMode::PostOnly,
+        )
     }
 
     fn request_graphql_raw_with_limits(
@@ -1325,12 +1352,13 @@ impl KibelClient {
         variables: Value,
         timeout_ms: u64,
         max_response_bytes: Option<usize>,
+        mode: QueryTransportMode,
     ) -> Result<Value, KibelClientError> {
         let timeout = Duration::from_millis(timeout_ms.max(100));
-        let payload = Value::Object(serde_json::Map::from_iter([
-            ("query".to_string(), Value::String(query.to_string())),
-            ("variables".to_string(), variables),
-        ]));
+        let payload = json!({
+            "query": query,
+            "variables": variables.clone(),
+        });
         let payload_raw = payload.to_string();
 
         test_capture_request_payload(&payload_raw)?;
@@ -1346,10 +1374,97 @@ impl KibelClient {
             return Ok(parsed);
         }
 
+        let parsed = match mode {
+            QueryTransportMode::PostOnly => {
+                self.request_graphql_post(timeout, max_response_bytes, query, &variables, None)?
+            }
+            QueryTransportMode::TrustedQueryApqGet => {
+                self.request_trusted_query_with_apq(timeout, max_response_bytes, query, &variables)?
+            }
+        };
+
+        finalize_graphql_response(parsed)
+    }
+
+    fn request_trusted_query_with_apq(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        query: &str,
+        variables: &Value,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let persisted_hash = sha256_hex(query);
+        let extensions = json!({
+            "persistedQuery": {
+                "version": APQ_VERSION,
+                "sha256Hash": persisted_hash,
+            }
+        });
+
+        let variables_raw = serde_json::to_string(variables)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
+
+        if variables_raw.len() > APQ_GET_VARIABLES_LIMIT_BYTES {
+            return self.request_graphql_post(
+                timeout,
+                max_response_bytes,
+                query,
+                variables,
+                Some(&extensions),
+            );
+        }
+
+        let get_response = self.request_graphql_get_hash_only(
+            timeout,
+            max_response_bytes,
+            variables,
+            &extensions,
+        )?;
+        if should_fallback_apq_status(get_response.status_code) {
+            return self.request_graphql_post(timeout, max_response_bytes, query, variables, None);
+        }
+
+        let Some((error_code, message)) = extract_graphql_error(&get_response.payload) else {
+            return Ok(get_response);
+        };
+
+        if is_persisted_query_not_found(&error_code, &message) {
+            return self.request_graphql_post(
+                timeout,
+                max_response_bytes,
+                query,
+                variables,
+                Some(&extensions),
+            );
+        }
+        if is_persisted_query_not_supported(&error_code, &message) {
+            return self.request_graphql_post(timeout, max_response_bytes, query, variables, None);
+        }
+
+        Ok(get_response)
+    }
+
+    fn request_graphql_post(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        query: &str,
+        variables: &Value,
+        extensions: Option<&Value>,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let mut payload_object = serde_json::Map::new();
+        payload_object.insert("query".to_string(), Value::String(query.to_string()));
+        payload_object.insert("variables".to_string(), variables.clone());
+        if let Some(extensions) = extensions {
+            payload_object.insert("extensions".to_string(), extensions.clone());
+        }
+        let payload_raw = Value::Object(payload_object).to_string();
+
         let agent = ureq::AgentBuilder::new().timeout(timeout).build();
         let request = agent
             .post(&self.endpoint)
             .set("Content-Type", "application/json")
+            .set("Accept", GRAPHQL_ACCEPT_HEADER)
             .set("Authorization", &format!("Bearer {}", self.token));
 
         let (raw, status_code) = match request.send_string(&payload_raw) {
@@ -1366,20 +1481,44 @@ impl KibelClient {
             }
         };
 
-        let parsed = serde_json::from_str::<Value>(&raw)
-            .map_err(|err| KibelClientError::Transport(format!("invalid JSON response: {err}")))?;
+        parse_http_response(raw, status_code)
+    }
 
-        if let Some((code, message)) = extract_graphql_error(&parsed) {
-            return Err(KibelClientError::Api { code, message });
-        }
+    fn request_graphql_get_hash_only(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        variables: &Value,
+        extensions: &Value,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let variables_raw = serde_json::to_string(variables)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
+        let extensions_raw = serde_json::to_string(extensions)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
 
-        if let Some(code) = status_code {
-            return Err(KibelClientError::Transport(format!(
-                "http status {code} without graphql errors"
-            )));
-        }
+        let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+        let request = agent
+            .get(&self.endpoint)
+            .query("variables", &variables_raw)
+            .query("extensions", &extensions_raw)
+            .set("Accept", GRAPHQL_ACCEPT_HEADER)
+            .set("Authorization", &format!("Bearer {}", self.token));
 
-        Ok(parsed)
+        let (raw, status_code) = match request.call() {
+            Ok(response) => {
+                let body = read_response_body(response, max_response_bytes)?;
+                (body, None)
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = read_response_body(response, max_response_bytes)?;
+                (body, Some(code))
+            }
+            Err(err) => {
+                return Err(KibelClientError::Transport(err.to_string()));
+            }
+        };
+
+        parse_http_response(raw, status_code)
     }
 
     fn resolve_create_note_schema(&self) -> CreateNoteSchema {
@@ -1440,6 +1579,60 @@ fn read_response_body(
             .into_string()
             .map_err(|error| KibelClientError::Transport(error.to_string())),
     }
+}
+
+fn parse_http_response(
+    raw: String,
+    status_code: Option<u16>,
+) -> Result<ParsedGraphqlResponse, KibelClientError> {
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| KibelClientError::Transport(format!("invalid JSON response: {error}")))?;
+    Ok(ParsedGraphqlResponse {
+        payload,
+        status_code,
+    })
+}
+
+fn finalize_graphql_response(response: ParsedGraphqlResponse) -> Result<Value, KibelClientError> {
+    if let Some((code, message)) = extract_graphql_error(&response.payload) {
+        return Err(KibelClientError::Api { code, message });
+    }
+    if let Some(code) = response.status_code {
+        return Err(KibelClientError::Transport(format!(
+            "http status {code} without graphql errors"
+        )));
+    }
+    Ok(response.payload)
+}
+
+fn should_fallback_apq_status(status_code: Option<u16>) -> bool {
+    matches!(
+        status_code,
+        Some(400 | 404 | 405 | 406 | 414 | 415 | 422 | 501)
+    )
+}
+
+fn is_persisted_query_not_found(code: &str, message: &str) -> bool {
+    code.eq_ignore_ascii_case("PERSISTED_QUERY_NOT_FOUND")
+        || message
+            .to_ascii_uppercase()
+            .contains("PERSISTED_QUERY_NOT_FOUND")
+}
+
+fn is_persisted_query_not_supported(code: &str, message: &str) -> bool {
+    code.eq_ignore_ascii_case("PERSISTED_QUERY_NOT_SUPPORTED")
+        || message
+            .to_ascii_uppercase()
+            .contains("PERSISTED_QUERY_NOT_SUPPORTED")
+}
+
+fn sha256_hex(raw: &str) -> String {
+    let digest = Sha256::digest(raw.as_bytes());
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
 }
 
 fn validate_trusted_operation_request(
@@ -1804,13 +1997,26 @@ fn fixture_response_env_set() -> bool {
 }
 
 fn should_skip_runtime_introspection() -> bool {
-    if let Ok(raw) = std::env::var("KIBEL_DISABLE_RUNTIME_INTROSPECTION") {
-        let normalized = raw.trim().to_ascii_lowercase();
-        if normalized == "1" || normalized == "true" || normalized == "yes" {
-            return true;
-        }
+    if fixture_response_env_set() {
+        return true;
     }
-    fixture_response_env_set()
+    if env_flag_is_true("KIBEL_ENABLE_RUNTIME_INTROSPECTION") {
+        return false;
+    }
+    if env_flag_is_true("KIBEL_DISABLE_RUNTIME_INTROSPECTION") {
+        return true;
+    }
+    true
+}
+
+fn env_flag_is_true(name: &str) -> bool {
+    let Ok(raw) = std::env::var(name) else {
+        return false;
+    };
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -1941,11 +2147,12 @@ fn collect_name_set(value: &Value) -> BTreeSet<String> {
 mod tests {
     use super::{
         collect_name_set, endpoint_from_origin, extract_graphql_error, extract_root_field,
+        is_persisted_query_not_found, is_persisted_query_not_supported,
         load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
-        resource_contract_version, resource_contracts, should_skip_runtime_introspection,
-        trusted_operation_contract, trusted_operations, validate_trusted_operation_request,
-        CreateNoteInput, CreateNoteSchema, KibelClient, TrustedOperation, QUERY_GET_FOLDER,
-        QUERY_NOTE_GET,
+        resource_contract_version, resource_contracts, should_fallback_apq_status,
+        should_skip_runtime_introspection, trusted_operation_contract, trusted_operations,
+        validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema, KibelClient,
+        TrustedOperation, QUERY_GET_FOLDER, QUERY_NOTE_GET,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -2065,6 +2272,37 @@ mod tests {
         std::env::set_var("KIBEL_TEST_GRAPHQL_RESPONSE", "{\"data\":{}}");
         assert!(should_skip_runtime_introspection());
         std::env::remove_var("KIBEL_TEST_GRAPHQL_RESPONSE");
+    }
+
+    #[test]
+    fn should_skip_runtime_introspection_by_default() {
+        std::env::remove_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_DISABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_TEST_GRAPHQL_RESPONSE");
+        assert!(should_skip_runtime_introspection());
+    }
+
+    #[test]
+    fn should_allow_runtime_introspection_when_explicitly_enabled() {
+        std::env::set_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION", "1");
+        std::env::remove_var("KIBEL_DISABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_TEST_GRAPHQL_RESPONSE");
+        assert!(!should_skip_runtime_introspection());
+        std::env::remove_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION");
+    }
+
+    #[test]
+    fn apq_error_helpers_detect_known_errors() {
+        assert!(is_persisted_query_not_found(
+            "PERSISTED_QUERY_NOT_FOUND",
+            "PersistedQueryNotFound"
+        ));
+        assert!(is_persisted_query_not_supported(
+            "PERSISTED_QUERY_NOT_SUPPORTED",
+            "PersistedQueryNotSupported"
+        ));
+        assert!(should_fallback_apq_status(Some(405)));
+        assert!(!should_fallback_apq_status(Some(200)));
     }
 
     #[test]

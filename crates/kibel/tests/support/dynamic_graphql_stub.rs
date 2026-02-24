@@ -10,7 +10,9 @@ use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct CapturedRequest {
+    pub method: String,
     pub path: String,
+    pub accept: Option<String>,
     pub root_field: Option<String>,
     pub query: String,
     pub variables: Value,
@@ -32,6 +34,7 @@ struct CreateNoteSchemaSnapshot {
 struct ServerState {
     resource_specs_by_field: HashMap<String, ResourceSpec>,
     create_note_schema: CreateNoteSchemaSnapshot,
+    persisted_queries: Arc<Mutex<HashMap<String, String>>>,
     captured_requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -50,6 +53,7 @@ impl DynamicGraphqlStubServer {
                 .expect("resource contracts should load"),
             create_note_schema: load_create_note_schema_snapshot(&repo_root)
                 .expect("create-note schema should load"),
+            persisted_queries: Arc::new(Mutex::new(HashMap::new())),
             captured_requests: Arc::new(Mutex::new(Vec::new())),
         };
 
@@ -123,7 +127,10 @@ impl Drop for DynamicGraphqlStubServer {
 
 #[derive(Debug)]
 struct HttpRequest {
+    method: String,
     path: String,
+    headers: HashMap<String, String>,
+    query_params: HashMap<String, String>,
     body: Vec<u8>,
 }
 
@@ -235,17 +242,32 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) -> Result<(), S
         .map_err(|error| format!("failed to set read timeout: {error}"))?;
 
     let request = read_http_request(&mut stream)?;
-    let payload = serde_json::from_slice::<Value>(&request.body)
-        .map_err(|error| format!("invalid JSON request body: {error}"))?;
-    let query = payload
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "request missing string query".to_string())?
-        .to_string();
-    let variables = payload
-        .get("variables")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let (query, variables) = match parse_graphql_request(&request, state) {
+        Ok(parsed) => parsed,
+        Err(error) if error.contains("PERSISTED_QUERY_NOT_FOUND") => {
+            let variables = request
+                .query_params
+                .get("variables")
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .unwrap_or_else(|| json!({}));
+            state
+                .captured_requests
+                .lock()
+                .map_err(|_| "captured requests mutex poisoned".to_string())?
+                .push(CapturedRequest {
+                    method: request.method.clone(),
+                    path: request.path.clone(),
+                    accept: request.headers.get("accept").cloned(),
+                    root_field: None,
+                    query: String::new(),
+                    variables,
+                });
+            let payload = graphql_error("persisted query not found", "PERSISTED_QUERY_NOT_FOUND");
+            write_json_response(&mut stream, &payload)?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
 
     let root_field = extract_root_field(&query);
     state
@@ -253,7 +275,9 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) -> Result<(), S
         .lock()
         .map_err(|_| "captured requests mutex poisoned".to_string())?
         .push(CapturedRequest {
+            method: request.method.clone(),
             path: request.path,
+            accept: request.headers.get("accept").cloned(),
             root_field: root_field.clone(),
             query: query.clone(),
             variables: variables.clone(),
@@ -261,6 +285,103 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) -> Result<(), S
 
     let response_payload = route_graphql_request(&query, &variables, root_field, state);
     write_json_response(&mut stream, &response_payload)
+}
+
+fn parse_graphql_request(
+    request: &HttpRequest,
+    state: &ServerState,
+) -> Result<(String, Value), String> {
+    let method = request.method.trim().to_ascii_uppercase();
+    if method == "POST" {
+        let payload = serde_json::from_slice::<Value>(&request.body)
+            .map_err(|error| format!("invalid JSON request body: {error}"))?;
+        let query = payload
+            .get("query")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "request missing string query".to_string())?
+            .to_string();
+        let variables = payload
+            .get("variables")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        if let Some(hash) = payload.get("extensions").and_then(extract_persisted_hash) {
+            remember_persisted_query(state, &hash, &query)?;
+        }
+        return Ok((query, variables));
+    }
+
+    if method == "GET" {
+        let variables = request
+            .query_params
+            .get("variables")
+            .map(|raw| {
+                serde_json::from_str::<Value>(raw)
+                    .map_err(|error| format!("invalid GET variables JSON: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_else(|| json!({}));
+
+        let query_from_param = request
+            .query_params
+            .get("query")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let extensions = request
+            .query_params
+            .get("extensions")
+            .map(|raw| {
+                serde_json::from_str::<Value>(raw)
+                    .map_err(|error| format!("invalid GET extensions JSON: {error}"))
+            })
+            .transpose()?;
+        if let (Some(query), Some(hash)) = (
+            query_from_param.as_deref(),
+            extensions.as_ref().and_then(extract_persisted_hash),
+        ) {
+            remember_persisted_query(state, &hash, query)?;
+        }
+
+        let query = if let Some(query) = query_from_param {
+            query
+        } else if let Some(hash) = extensions.as_ref().and_then(extract_persisted_hash) {
+            load_persisted_query(state, &hash).ok_or_else(|| {
+                "persisted query hash not found in stub cache: PERSISTED_QUERY_NOT_FOUND"
+                    .to_string()
+            })?
+        } else {
+            return Err("GET request missing `query` and persisted hash extensions".to_string());
+        };
+
+        return Ok((query, variables));
+    }
+
+    Err(format!("unsupported HTTP method in stub server: {method}"))
+}
+
+fn extract_persisted_hash(extensions: &Value) -> Option<String> {
+    extensions
+        .pointer("/persistedQuery/sha256Hash")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn remember_persisted_query(state: &ServerState, hash: &str, query: &str) -> Result<(), String> {
+    state
+        .persisted_queries
+        .lock()
+        .map_err(|_| "persisted query cache mutex poisoned".to_string())?
+        .insert(hash.to_string(), query.to_string());
+    Ok(())
+}
+
+fn load_persisted_query(state: &ServerState, hash: &str) -> Option<String> {
+    state
+        .persisted_queries
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(hash).cloned())
 }
 
 fn route_graphql_request(
@@ -638,20 +759,23 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
         .lines()
         .next()
         .ok_or_else(|| "request line missing".to_string())?;
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("/")
-        .to_string();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or("GET").to_string();
+    let raw_target = request_parts.next().unwrap_or("/");
+    let (path, query_params) = split_path_and_query(raw_target)?;
 
     let mut content_length = 0_usize;
+    let mut headers = HashMap::new();
     for line in headers_raw.lines().skip(1) {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
-        if name.trim().eq_ignore_ascii_case("content-length") {
-            content_length = value.trim().parse::<usize>().unwrap_or(0);
+        let key = name.trim().to_ascii_lowercase();
+        let normalized_value = value.trim().to_string();
+        if key == "content-length" {
+            content_length = normalized_value.parse::<usize>().unwrap_or(0);
         }
+        headers.insert(key, normalized_value);
     }
 
     let body_start = header_end + 4;
@@ -672,7 +796,76 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
     }
     body.truncate(content_length);
 
-    Ok(HttpRequest { path, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        query_params,
+        body,
+    })
+}
+
+fn split_path_and_query(raw_target: &str) -> Result<(String, HashMap<String, String>), String> {
+    let (path, query_raw) = match raw_target.split_once('?') {
+        Some((path, query_raw)) => (path, Some(query_raw)),
+        None => (raw_target, None),
+    };
+    let query_params = parse_query_params(query_raw.unwrap_or(""))?;
+    Ok((path.to_string(), query_params))
+}
+
+fn parse_query_params(raw: &str) -> Result<HashMap<String, String>, String> {
+    let mut params = HashMap::new();
+    if raw.trim().is_empty() {
+        return Ok(params);
+    }
+    for pair in raw.split('&') {
+        if pair.trim().is_empty() {
+            continue;
+        }
+        let (key_raw, value_raw) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = percent_decode(key_raw)?;
+        let value = percent_decode(value_raw)?;
+        params.insert(key, value);
+    }
+    Ok(params)
+}
+
+fn percent_decode(raw: &str) -> Result<String, String> {
+    let bytes = raw.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                output.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                if index + 2 >= bytes.len() {
+                    return Err("invalid percent-encoding in query parameter".to_string());
+                }
+                let high = decode_hex_nibble(bytes[index + 1])?;
+                let low = decode_hex_nibble(bytes[index + 2])?;
+                output.push((high << 4) | low);
+                index += 3;
+            }
+            value => {
+                output.push(value);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(output).map_err(|error| format!("query parameter is not utf-8: {error}"))
+}
+
+fn decode_hex_nibble(raw: u8) -> Result<u8, String> {
+    match raw {
+        b'0'..=b'9' => Ok(raw - b'0'),
+        b'a'..=b'f' => Ok(raw - b'a' + 10),
+        b'A'..=b'F' => Ok(raw - b'A' + 10),
+        _ => Err("invalid percent-encoding in query parameter".to_string()),
+    }
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {

@@ -118,7 +118,14 @@ Not supported (intentional):
 
 - mutation requires explicit `--allow-mutation`.
 - mutation root field must be in trusted resource-contract allowlist.
+- trusted query commands use GET + persisted-hash negotiation with safe POST fallback.
+- `graphql run` (untrusted lane) stays POST-only to avoid URL leakage of ad-hoc payloads.
 - no `--dangerous` override exists in current release.
+
+Create-note runtime introspection policy:
+
+- default is OFF in production path.
+- enable explicitly only when needed: `KIBEL_ENABLE_RUNTIME_INTROSPECTION=1`.
 
 ## Library Usage (`kibel-client`)
 

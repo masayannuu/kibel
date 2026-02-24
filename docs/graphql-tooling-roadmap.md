@@ -38,12 +38,14 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Untrusted lane:
   - Explicit `graphql` command group for ad-hoc execution.
   - Requires runtime policy controls and bounded execution.
+  - HTTP transport is POST-only by design.
 
 ### Guardrails for untrusted lane
 - Mandatory request timeout.
 - Response-size limit and strict JSON output mode.
 - Depth/cost budget checks are mandatory when schema metadata allows; otherwise fail-closed policy is required.
 - Mutation root-field allowlist derived from trusted resource contracts (enabled).
+- Trusted query transport uses persisted-hash GET with safe POST fallback.
 - Error contract parity with built-in commands:
   - `--json` failures must always produce normalized `error.code`.
 
