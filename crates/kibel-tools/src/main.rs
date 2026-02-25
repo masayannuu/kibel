@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
+use thiserror::Error;
 
 const INTROSPECTION_QUERY: &str = r#"
 query EndpointIntrospection {
@@ -269,7 +270,7 @@ impl DocumentFallbackMode {
 struct CreateNoteContractArgs {
     #[arg(
         long,
-        default_value = "research/schema/create_note_contract.snapshot.json"
+        default_value = "schema/contracts/create_note_contract.snapshot.json"
     )]
     snapshot: String,
     #[arg(
@@ -283,12 +284,12 @@ struct CreateNoteContractArgs {
 struct CreateNoteRefreshFromEndpointArgs {
     #[arg(
         long,
-        default_value = "research/schema/resource_contracts.endpoint.snapshot.json"
+        default_value = "schema/introspection/resource_contracts.endpoint.snapshot.json"
     )]
     endpoint_snapshot: String,
     #[arg(
         long,
-        default_value = "research/schema/create_note_contract.snapshot.json"
+        default_value = "schema/contracts/create_note_contract.snapshot.json"
     )]
     snapshot: String,
 }
@@ -297,12 +298,12 @@ struct CreateNoteRefreshFromEndpointArgs {
 struct ResourceContractArgs {
     #[arg(
         long,
-        default_value = "research/schema/resource_contracts.endpoint.snapshot.json"
+        default_value = "schema/introspection/resource_contracts.endpoint.snapshot.json"
     )]
     endpoint_snapshot: String,
     #[arg(
         long,
-        default_value = "research/schema/resource_contracts.snapshot.json"
+        default_value = "schema/contracts/resource_contracts.snapshot.json"
     )]
     snapshot: String,
     #[arg(
@@ -320,8 +321,16 @@ struct ResourceContractDiffArgs {
     base: String,
     #[arg(long)]
     target: String,
+    #[arg(long, value_enum, default_value_t = DiffOutputFormat::Text)]
+    format: DiffOutputFormat,
     #[arg(long, default_value_t = false)]
     fail_on_breaking: bool,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum DiffOutputFormat {
+    Text,
+    Json,
 }
 
 #[derive(Args, Clone)]
@@ -332,7 +341,7 @@ struct EndpointRefreshArgs {
     token: String,
     #[arg(
         long,
-        default_value = "research/schema/resource_contracts.endpoint.snapshot.json"
+        default_value = "schema/introspection/resource_contracts.endpoint.snapshot.json"
     )]
     endpoint_snapshot: String,
     #[arg(long)]
@@ -406,6 +415,32 @@ struct EndpointResource {
     document: String,
 }
 
+type ToolResult<T> = Result<T, ToolError>;
+
+#[derive(Debug, Error)]
+enum ToolError {
+    #[error("{0}")]
+    Message(String),
+}
+
+impl ToolError {
+    fn message(value: impl Into<String>) -> Self {
+        Self::Message(value.into())
+    }
+}
+
+impl From<String> for ToolError {
+    fn from(value: String) -> Self {
+        Self::Message(value)
+    }
+}
+
+impl From<&str> for ToolError {
+    fn from(value: &str) -> Self {
+        Self::Message(value.to_string())
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
@@ -417,7 +452,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
+fn run(cli: Cli) -> ToolResult<()> {
     let root = repo_root();
     match cli.command {
         TopCommand::CreateNoteContract { action } => match action {
@@ -468,20 +503,20 @@ fn endpoint_from_origin(origin: &str) -> String {
     }
 }
 
-fn now_rfc3339() -> Result<String, String> {
-    time::OffsetDateTime::now_utc()
+fn now_rfc3339() -> ToolResult<String> {
+    Ok(time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .map_err(|error| format!("failed to format timestamp: {error}"))
+        .map_err(|error| format!("failed to format timestamp: {error}"))?)
 }
 
-fn read_json(path: &Path) -> Result<Value, String> {
+fn read_json(path: &Path) -> ToolResult<Value> {
     let raw = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    serde_json::from_str::<Value>(&raw)
-        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+    Ok(serde_json::from_str::<Value>(&raw)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?)
 }
 
-fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
+fn write_json_pretty(path: &Path, value: &Value) -> ToolResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
@@ -489,8 +524,8 @@ fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
     let mut rendered = serde_json::to_string_pretty(value)
         .map_err(|error| format!("json render failed: {error}"))?;
     rendered.push('\n');
-    fs::write(path, rendered)
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    Ok(fs::write(path, rendered)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?)
 }
 
 fn value_to_string(value: &Value) -> String {
@@ -500,7 +535,7 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
-fn normalize_string_list(value: &Value, context: &str) -> Result<Vec<String>, String> {
+fn normalize_string_list(value: &Value, context: &str) -> ToolResult<Vec<String>> {
     let items = value
         .as_array()
         .ok_or_else(|| format!("{context} must be an array"))?;
@@ -517,7 +552,7 @@ fn normalize_string_list(value: &Value, context: &str) -> Result<Vec<String>, St
     Ok(result)
 }
 
-fn collect_graphql_name_list(value: &Value, context: &str) -> Result<Vec<String>, String> {
+fn collect_graphql_name_list(value: &Value, context: &str) -> ToolResult<Vec<String>> {
     let items = value
         .as_array()
         .ok_or_else(|| format!("{context} must be an array"))?;
@@ -525,9 +560,7 @@ fn collect_graphql_name_list(value: &Value, context: &str) -> Result<Vec<String>
     let mut seen = HashSet::new();
     for item in items {
         let Some(name) = item.get("name").and_then(Value::as_str) else {
-            return Err(format!(
-                "{context} should contain objects with string `name`"
-            ));
+            return Err((format!("{context} should contain objects with string `name`")).into());
         };
         let normalized = name.trim();
         if normalized.is_empty() {
@@ -580,7 +613,7 @@ fn fetch_introspection_payload(
     endpoint: &str,
     token: &str,
     timeout_secs: u64,
-) -> Result<Value, String> {
+) -> ToolResult<Value> {
     fetch_graphql_payload(endpoint, token, INTROSPECTION_QUERY, timeout_secs)
 }
 
@@ -589,7 +622,7 @@ fn fetch_graphql_payload(
     token: &str,
     query: &str,
     timeout_secs: u64,
-) -> Result<Value, String> {
+) -> ToolResult<Value> {
     let payload = json!({
         "query": query,
         "variables": {}
@@ -620,7 +653,7 @@ fn fetch_graphql_payload(
             (body, Some(code))
         }
         Err(err) => {
-            return Err(format!("request failed: {err}"));
+            return Err((format!("request failed: {err}")).into());
         }
     };
 
@@ -628,9 +661,9 @@ fn fetch_graphql_payload(
         .map_err(|error| format!("failed to parse response: {error}"))?;
     if let Some(message) = extract_graphql_error_message(&payload) {
         if let Some(code) = status_code {
-            return Err(format!("graphql error (status {code}): {message}"));
+            return Err((format!("graphql error (status {code}): {message}")).into());
         }
-        return Err(format!("graphql error: {message}"));
+        return Err((format!("graphql error: {message}")).into());
     }
     Ok(payload)
 }
@@ -654,11 +687,11 @@ fn extract_graphql_error_message(payload: &Value) -> Option<String> {
 fn parse_graphql_fields(
     payload: &Value,
     kind: &str,
-) -> Result<HashMap<String, GraphqlFieldSpec>, String> {
+) -> ToolResult<HashMap<String, GraphqlFieldSpec>> {
     let pointer = match kind {
         "query" => "/data/__schema/queryType/fields",
         "mutation" => "/data/__schema/mutationType/fields",
-        _ => return Err(format!("unsupported graphql kind: {kind}")),
+        _ => return Err((format!("unsupported graphql kind: {kind}")).into()),
     };
 
     let fields = payload
@@ -718,10 +751,7 @@ fn parse_graphql_fields(
     Ok(result)
 }
 
-fn arg_is_required(
-    arg_object: &serde_json::Map<String, Value>,
-    context: &str,
-) -> Result<bool, String> {
+fn arg_is_required(arg_object: &serde_json::Map<String, Value>, context: &str) -> ToolResult<bool> {
     let type_value = arg_object
         .get("type")
         .ok_or_else(|| format!("{context} missing type"))?;
@@ -730,7 +760,7 @@ fn arg_is_required(
     Ok(kind == "NON_NULL" && default_value.is_none_or(|value| value.is_null()))
 }
 
-fn parse_graphql_type_ref(value: &Value, context: &str) -> Result<GraphqlTypeRef, String> {
+fn parse_graphql_type_ref(value: &Value, context: &str) -> ToolResult<GraphqlTypeRef> {
     let object = value
         .as_object()
         .ok_or_else(|| format!("{context} must be an object"))?;
@@ -741,7 +771,7 @@ fn parse_graphql_type_ref(value: &Value, context: &str) -> Result<GraphqlTypeRef
         .trim()
         .to_string();
     if kind.is_empty() {
-        return Err(format!("{context} kind is empty"));
+        return Err((format!("{context} kind is empty")).into());
     }
     let name = object
         .get("name")
@@ -780,7 +810,7 @@ fn render_graphql_type_ref(type_ref: &GraphqlTypeRef) -> String {
     }
 }
 
-fn parse_schema_types(payload: &Value) -> Result<HashMap<String, GraphqlTypeDefinition>, String> {
+fn parse_schema_types(payload: &Value) -> ToolResult<HashMap<String, GraphqlTypeDefinition>> {
     let Some(types) = payload.pointer("/data/__schema/types") else {
         return Ok(HashMap::new());
     };
@@ -800,7 +830,7 @@ fn parse_schema_types(payload: &Value) -> Result<HashMap<String, GraphqlTypeDefi
 fn parse_schema_type_entry(
     item: &Value,
     context: &str,
-) -> Result<Option<(String, GraphqlTypeDefinition)>, String> {
+) -> ToolResult<Option<(String, GraphqlTypeDefinition)>> {
     let object = item
         .as_object()
         .ok_or_else(|| format!("{context} must be object"))?;
@@ -836,7 +866,7 @@ fn parse_schema_type_entry(
 fn parse_schema_field_definitions(
     object: &serde_json::Map<String, Value>,
     context: &str,
-) -> Result<Vec<GraphqlFieldDefinition>, String> {
+) -> ToolResult<Vec<GraphqlFieldDefinition>> {
     let Some(field_items) = object.get("fields").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
@@ -853,7 +883,7 @@ fn parse_schema_field_definitions(
 fn parse_schema_field_definition(
     field_item: &Value,
     context: &str,
-) -> Result<GraphqlFieldDefinition, String> {
+) -> ToolResult<GraphqlFieldDefinition> {
     let field_object = field_item
         .as_object()
         .ok_or_else(|| format!("{context} must be object"))?;
@@ -875,7 +905,7 @@ fn parse_schema_field_definition(
 fn parse_schema_field_args(
     field_object: &serde_json::Map<String, Value>,
     context: &str,
-) -> Result<Vec<GraphqlArg>, String> {
+) -> ToolResult<Vec<GraphqlArg>> {
     let args = field_object
         .get("args")
         .and_then(Value::as_array)
@@ -1173,7 +1203,7 @@ fn get_trimmed_string(
     object: &serde_json::Map<String, Value>,
     key: &str,
     context: &str,
-) -> Result<String, String> {
+) -> ToolResult<String> {
     let value = object
         .get(key)
         .ok_or_else(|| format!("{context} missing `{key}`"))?;
@@ -1183,12 +1213,15 @@ fn get_trimmed_string(
 fn parse_schema_contract_version(
     object: &serde_json::Map<String, Value>,
     context: &str,
-) -> Result<u32, String> {
+) -> ToolResult<u32> {
     let raw = object
         .get("schema_contract_version")
         .and_then(Value::as_u64)
         .ok_or_else(|| format!("{context} must contain numeric `schema_contract_version`"))?;
-    u32::try_from(raw).map_err(|_| format!("{context} schema_contract_version out of range"))
+    Ok(
+        u32::try_from(raw)
+            .map_err(|_| format!("{context} schema_contract_version out of range"))?,
+    )
 }
 
 fn rust_string(value: &str) -> String {
@@ -1223,7 +1256,7 @@ fn render_array_const(name: &str, values: &[String]) -> String {
     lines.join("\n")
 }
 
-fn load_create_note_snapshot(path: &Path) -> Result<CreateNoteSnapshot, String> {
+fn load_create_note_snapshot(path: &Path) -> ToolResult<CreateNoteSnapshot> {
     let payload = read_json(path)?;
     let object = payload
         .as_object()
@@ -1277,7 +1310,7 @@ fn load_create_note_snapshot(path: &Path) -> Result<CreateNoteSnapshot, String> 
         .cloned()
         .collect::<Vec<_>>();
     if !missing_input.is_empty() {
-        return Err(format!("missing required input fields: {missing_input:?}"));
+        return Err((format!("missing required input fields: {missing_input:?}")).into());
     }
 
     let missing_payload = required_payload_fields
@@ -1286,13 +1319,11 @@ fn load_create_note_snapshot(path: &Path) -> Result<CreateNoteSnapshot, String> 
         .cloned()
         .collect::<Vec<_>>();
     if !missing_payload.is_empty() {
-        return Err(format!(
-            "missing required payload fields: {missing_payload:?}"
-        ));
+        return Err((format!("missing required payload fields: {missing_payload:?}")).into());
     }
 
     if !note_projection_fields.iter().any(|field| field == "id") {
-        return Err("create_note_note_projection_fields must include `id`".to_string());
+        return Err(("create_note_note_projection_fields must include `id`".to_string()).into());
     }
 
     Ok(CreateNoteSnapshot {
@@ -1324,10 +1355,7 @@ fn render_create_note_module(snapshot: &CreateNoteSnapshot) -> String {
     rendered
 }
 
-fn run_create_note_contract_check(
-    root: &Path,
-    args: &CreateNoteContractArgs,
-) -> Result<(), String> {
+fn run_create_note_contract_check(root: &Path, args: &CreateNoteContractArgs) -> ToolResult<()> {
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
     let snapshot = load_create_note_snapshot(&snapshot_path)?;
@@ -1335,18 +1363,16 @@ fn run_create_note_contract_check(
     let actual = fs::read_to_string(&generated_path)
         .map_err(|error| format!("failed to read {}: {error}", generated_path.display()))?;
     if actual != expected {
-        return Err("generated file is stale. run:\n\
+        return Err(("generated file is stale. run:\n\
              cargo run -p kibel-tools -- create-note-contract write"
-            .to_string());
+            .to_string())
+        .into());
     }
     println!("schema contract check: ok");
     Ok(())
 }
 
-fn run_create_note_contract_write(
-    root: &Path,
-    args: &CreateNoteContractArgs,
-) -> Result<(), String> {
+fn run_create_note_contract_write(root: &Path, args: &CreateNoteContractArgs) -> ToolResult<()> {
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
     let snapshot = load_create_note_snapshot(&snapshot_path)?;
@@ -1364,7 +1390,7 @@ fn run_create_note_contract_write(
 fn run_create_note_contract_refresh_from_endpoint(
     root: &Path,
     args: &CreateNoteRefreshFromEndpointArgs,
-) -> Result<(), String> {
+) -> ToolResult<()> {
     let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
     let endpoint_snapshot_payload = read_json(&endpoint_snapshot_path)?;
     let snapshot_value =
@@ -1378,7 +1404,7 @@ fn run_create_note_contract_refresh_from_endpoint(
 
 fn build_create_note_schema_from_endpoint_introspection(
     payload: &Value,
-) -> Result<CreateNoteSnapshot, String> {
+) -> ToolResult<CreateNoteSnapshot> {
     let input_fields = collect_schema_type_member_names(
         payload,
         "CreateNoteInput",
@@ -1408,7 +1434,7 @@ fn build_create_note_schema_from_endpoint_introspection(
     })
 }
 
-fn build_create_note_snapshot_from_endpoint_snapshot(payload: &Value) -> Result<Value, String> {
+fn build_create_note_snapshot_from_endpoint_snapshot(payload: &Value) -> ToolResult<Value> {
     let context = "endpoint snapshot";
     let object = payload
         .as_object()
@@ -1471,7 +1497,7 @@ fn collect_schema_type_member_names(
     type_name: &str,
     member_key: &str,
     context: &str,
-) -> Result<Vec<String>, String> {
+) -> ToolResult<Vec<String>> {
     let types = payload
         .pointer("/data/__schema/types")
         .and_then(Value::as_array)
@@ -1496,7 +1522,7 @@ fn validate_create_note_schema_fields(
     payload_fields: &[String],
     note_projection_fields: &[String],
     context: &str,
-) -> Result<(), String> {
+) -> ToolResult<()> {
     let input_set = input_fields
         .iter()
         .map(String::as_str)
@@ -1511,10 +1537,11 @@ fn validate_create_note_schema_fields(
         .copied()
         .collect::<Vec<_>>();
     if !missing_required_input.is_empty() {
-        return Err(format!(
+        return Err((format!(
             "{context} missing required create-note input fields: {}",
             missing_required_input.join(", ")
-        ));
+        ))
+        .into());
     }
     let missing_required_payload = REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS
         .iter()
@@ -1522,13 +1549,14 @@ fn validate_create_note_schema_fields(
         .copied()
         .collect::<Vec<_>>();
     if !missing_required_payload.is_empty() {
-        return Err(format!(
+        return Err((format!(
             "{context} missing required create-note payload fields: {}",
             missing_required_payload.join(", ")
-        ));
+        ))
+        .into());
     }
     if !note_projection_fields.iter().any(|field| field == "id") {
-        return Err(format!("{context} note projection must include `id`"));
+        return Err((format!("{context} note projection must include `id`")).into());
     }
     Ok(())
 }
@@ -1563,7 +1591,7 @@ fn build_endpoint_snapshot_from_introspection(
     endpoint: &str,
     captured_at: &str,
     fallback_mode: DocumentFallbackMode,
-) -> Result<Value, String> {
+) -> ToolResult<Value> {
     let query_fields = parse_graphql_fields(payload, "query")?;
     let mutation_fields = parse_graphql_fields(payload, "mutation")?;
     let type_map = parse_schema_types(payload)?;
@@ -1574,7 +1602,7 @@ fn build_endpoint_snapshot_from_introspection(
         let fields = match definition.kind {
             "query" => &query_fields,
             "mutation" => &mutation_fields,
-            other => return Err(format!("unsupported kind: {other}")),
+            other => return Err((format!("unsupported kind: {other}")).into()),
         };
         let field_spec = fields
             .get(definition.field)
@@ -1606,10 +1634,11 @@ fn build_endpoint_snapshot_from_introspection(
                     )
                 })?
         } else {
-            return Err(format!(
+            return Err((format!(
                 "failed to build operation document for `{}` in strict mode",
                 definition.name
-            ));
+            ))
+            .into());
         };
 
         resources.push(json!({
@@ -1645,7 +1674,7 @@ fn build_endpoint_snapshot_from_introspection(
 fn load_endpoint_snapshot(
     path: &Path,
     fallback_mode: DocumentFallbackMode,
-) -> Result<EndpointSnapshot, String> {
+) -> ToolResult<EndpointSnapshot> {
     let payload = read_json(path)?;
     parse_endpoint_snapshot(&payload, fallback_mode)
 }
@@ -1653,7 +1682,7 @@ fn load_endpoint_snapshot(
 fn parse_endpoint_snapshot(
     payload: &Value,
     fallback_mode: DocumentFallbackMode,
-) -> Result<EndpointSnapshot, String> {
+) -> ToolResult<EndpointSnapshot> {
     let object = payload
         .as_object()
         .ok_or_else(|| "endpoint snapshot must be an object".to_string())?;
@@ -1670,28 +1699,29 @@ fn parse_endpoint_snapshot(
 
 fn endpoint_snapshot_resources_array(
     object: &serde_json::Map<String, Value>,
-) -> Result<&[Value], String> {
+) -> ToolResult<&[Value]> {
     let resources_value = object
         .get("resources")
         .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())?;
-    resources_value
+    Ok(resources_value
         .as_array()
         .map(Vec::as_slice)
-        .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())
+        .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())?)
 }
 
 fn parse_endpoint_resources(
     resources_array: &[Value],
     fallback_mode: DocumentFallbackMode,
-) -> Result<HashMap<String, EndpointResource>, String> {
+) -> ToolResult<HashMap<String, EndpointResource>> {
     let mut resources = HashMap::new();
     for (index, item) in resources_array.iter().enumerate() {
         let resource = parse_endpoint_resource(item, index, fallback_mode)?;
         if resources.contains_key(&resource.name) {
-            return Err(format!(
+            return Err((format!(
                 "duplicate resource name in endpoint snapshot: {}",
                 resource.name
-            ));
+            ))
+            .into());
         }
         resources.insert(resource.name.clone(), resource);
     }
@@ -1702,7 +1732,7 @@ fn parse_endpoint_resource(
     item: &Value,
     index: usize,
     fallback_mode: DocumentFallbackMode,
-) -> Result<EndpointResource, String> {
+) -> ToolResult<EndpointResource> {
     let context = format!("resources[{index}]");
     let object = item
         .as_object()
@@ -1710,20 +1740,21 @@ fn parse_endpoint_resource(
 
     let name = get_trimmed_string(object, "name", &context)?;
     if name.is_empty() {
-        return Err(format!("{context} has empty name"));
+        return Err((format!("{context} has empty name")).into());
     }
 
     let kind = get_trimmed_string(object, "kind", &context)?;
     if kind != "query" && kind != "mutation" {
-        return Err(format!("resource `{name}` has invalid kind: {kind}"));
+        return Err((format!("resource `{name}` has invalid kind: {kind}")).into());
     }
     let field = get_trimmed_string(object, "field", &context)?;
     let operation = get_trimmed_string(object, "operation", &context)?;
     let client_method = get_trimmed_string(object, "client_method", &context)?;
     if field.is_empty() || operation.is_empty() || client_method.is_empty() {
-        return Err(format!(
+        return Err((format!(
             "resource `{name}` must have non-empty field/operation/client_method"
-        ));
+        ))
+        .into());
     }
 
     let all_variables = normalize_string_list(
@@ -1757,7 +1788,7 @@ fn validate_required_subset(
     resource_name: &str,
     all_variables: &[String],
     required_variables: &[String],
-) -> Result<(), String> {
+) -> ToolResult<()> {
     let all_set = all_variables.iter().collect::<HashSet<_>>();
     let missing_required = required_variables
         .iter()
@@ -1767,17 +1798,18 @@ fn validate_required_subset(
     if missing_required.is_empty() {
         return Ok(());
     }
-    Err(format!(
+    Err((format!(
         "resource `{resource_name}` has required vars not in all_variables: {missing_required:?}"
     ))
+    .into())
 }
 
 fn parse_endpoint_resource_document(
     object: &serde_json::Map<String, Value>,
     resource_name: &str,
     fallback_mode: DocumentFallbackMode,
-) -> Result<String, String> {
-    object
+) -> ToolResult<String> {
+    Ok(object
         .get("document")
         .and_then(Value::as_str)
         .map(str::trim)
@@ -1800,19 +1832,19 @@ fn parse_endpoint_resource_document(
                     "resource `{resource_name}` missing `document` (strict mode). re-run refresh/write or use --document-fallback-mode breakglass temporarily"
                 )
             }
-        })
+        })?)
 }
 
 fn validate_endpoint_resource_coverage(
     resources: &HashMap<String, EndpointResource>,
-) -> Result<(), String> {
+) -> ToolResult<()> {
     let missing = resource_definitions()
         .iter()
         .filter(|definition| !resources.contains_key(definition.name))
         .map(|definition| definition.name.to_string())
         .collect::<Vec<_>>();
     if !missing.is_empty() {
-        return Err(format!("endpoint snapshot missing resources: {missing:?}"));
+        return Err((format!("endpoint snapshot missing resources: {missing:?}")).into());
     }
 
     let expected = resource_definitions()
@@ -1827,10 +1859,11 @@ fn validate_endpoint_resource_coverage(
     if unexpected.is_empty() {
         return Ok(());
     }
-    Err("endpoint snapshot contains unknown resources. \
+    Err(("endpoint snapshot contains unknown resources. \
          update RESOURCE_ORDER/CLI/client/tests first: "
         .to_string()
         + &format!("{unexpected:?}"))
+        .into())
 }
 
 fn endpoint_snapshot_meta_value(object: &serde_json::Map<String, Value>, key: &str) -> String {
@@ -1841,7 +1874,7 @@ fn build_resource_snapshot_value(
     root: &Path,
     endpoint_snapshot_path: &Path,
     endpoint_payload: &EndpointSnapshot,
-) -> Result<Value, String> {
+) -> ToolResult<Value> {
     let endpoint_snapshot_rel = endpoint_snapshot_path
         .strip_prefix(root)
         .map_err(|_| {
@@ -1887,7 +1920,7 @@ fn build_resource_snapshot_value(
     }))
 }
 
-fn normalize_resource_snapshot(payload: &Value) -> Result<NormalizedSnapshot, String> {
+fn normalize_resource_snapshot(payload: &Value) -> ToolResult<NormalizedSnapshot> {
     let object = payload
         .as_object()
         .ok_or_else(|| "snapshot must be an object".to_string())?;
@@ -1947,13 +1980,13 @@ fn normalize_resource_snapshot(payload: &Value) -> Result<NormalizedSnapshot, St
         let context = format!("resource[{index}]");
         let resource = parse_normalized_resource(item, &context)?;
         if seen_names.contains(&resource.name) {
-            return Err(format!("duplicate resource name: {}", resource.name));
+            return Err((format!("duplicate resource name: {}", resource.name)).into());
         }
         seen_names.insert(resource.name.clone());
         resources.push(resource);
     }
     if resources.is_empty() {
-        return Err("snapshot resources cannot be empty".to_string());
+        return Err(("snapshot resources cannot be empty".to_string()).into());
     }
     resources.sort_by(|left, right| left.name.cmp(&right.name));
 
@@ -1964,7 +1997,7 @@ fn normalize_resource_snapshot(payload: &Value) -> Result<NormalizedSnapshot, St
     })
 }
 
-fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedResource, String> {
+fn parse_normalized_resource(item: &Value, context: &str) -> ToolResult<NormalizedResource> {
     let object = item
         .as_object()
         .ok_or_else(|| format!("{context} must be an object"))?;
@@ -1979,17 +2012,17 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
         "document",
     ] {
         if !object.contains_key(key) {
-            return Err(format!("{context} is missing `{key}`"));
+            return Err((format!("{context} is missing `{key}`")).into());
         }
     }
 
     let name = get_trimmed_string(object, "name", context)?;
     if name.is_empty() {
-        return Err(format!("{context} name is empty"));
+        return Err((format!("{context} name is empty")).into());
     }
     let kind = get_trimmed_string(object, "kind", context)?;
     if kind != "query" && kind != "mutation" {
-        return Err(format!("resource `{name}` has invalid kind: {kind}"));
+        return Err((format!("resource `{name}` has invalid kind: {kind}")).into());
     }
     let operation = get_trimmed_string(object, "operation", context)?;
     let graphql_file = get_trimmed_string(object, "graphql_file", context)?;
@@ -2015,9 +2048,10 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
         .cloned()
         .collect::<Vec<_>>();
     if !missing_required.is_empty() {
-        return Err(format!(
+        return Err((format!(
             "resource `{name}` has required vars not in all_variables: {missing_required:?}"
-        ));
+        ))
+        .into());
     }
 
     Ok(NormalizedResource {
@@ -2138,7 +2172,16 @@ fn compute_resource_contract_diff(
     ResourceContractDiffResult { breaking, notes }
 }
 
-fn load_resource_module_snapshot(path: &Path) -> Result<ResourceModuleSnapshot, String> {
+fn resource_contract_diff_json(diff: &ResourceContractDiffResult) -> Value {
+    json!({
+        "breaking": diff.breaking,
+        "notes": diff.notes,
+        "breaking_count": diff.breaking.len(),
+        "notes_count": diff.notes.len(),
+    })
+}
+
+fn load_resource_module_snapshot(path: &Path) -> ToolResult<ResourceModuleSnapshot> {
     let payload = read_json(path)?;
     let object = payload
         .as_object()
@@ -2153,7 +2196,7 @@ fn load_resource_module_snapshot(path: &Path) -> Result<ResourceModuleSnapshot, 
         .and_then(Value::as_array)
         .ok_or_else(|| "snapshot must contain array `resources`".to_string())?;
     if resources_array.is_empty() {
-        return Err("snapshot resources cannot be empty".to_string());
+        return Err(("snapshot resources cannot be empty".to_string()).into());
     }
 
     let mut resources = Vec::new();
@@ -2162,7 +2205,7 @@ fn load_resource_module_snapshot(path: &Path) -> Result<ResourceModuleSnapshot, 
         let context = format!("resource[{index}]");
         let resource = parse_normalized_resource(item, &context)?;
         if seen_names.contains(&resource.name) {
-            return Err(format!("duplicate resource name: {}", resource.name));
+            return Err((format!("duplicate resource name: {}", resource.name)).into());
         }
         seen_names.insert(resource.name.clone());
         resources.push(resource);
@@ -2318,7 +2361,7 @@ fn render_resource_module(snapshot: &ResourceModuleSnapshot) -> String {
     rendered
 }
 
-fn rustfmt_source(source: &str) -> Result<String, String> {
+fn rustfmt_source(source: &str) -> ToolResult<String> {
     let temp_dir =
         tempfile::tempdir().map_err(|error| format!("failed to create temp dir: {error}"))?;
     let path = temp_dir.path().join("generated.rs");
@@ -2328,12 +2371,13 @@ fn rustfmt_source(source: &str) -> Result<String, String> {
         .status()
         .map_err(|error| format!("failed to run rustfmt: {error}"))?;
     if !status.success() {
-        return Err("rustfmt failed for generated module".to_string());
+        return Err(("rustfmt failed for generated module".to_string()).into());
     }
-    fs::read_to_string(&path).map_err(|error| format!("failed to read rustfmt output: {error}"))
+    Ok(fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read rustfmt output: {error}"))?)
 }
 
-fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> Result<(), String> {
+fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> ToolResult<()> {
     let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
@@ -2347,9 +2391,10 @@ fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> Resu
     let actual_snapshot = normalize_resource_snapshot(&actual_snapshot_value)?;
 
     if actual_snapshot != expected_snapshot {
-        return Err("resource snapshot is stale. run:\n\
+        return Err(("resource snapshot is stale. run:\n\
              cargo run -p kibel-tools -- resource-contract write"
-            .to_string());
+            .to_string())
+        .into());
     }
 
     let module_snapshot = load_resource_module_snapshot(&snapshot_path)?;
@@ -2357,16 +2402,17 @@ fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> Resu
     let actual_generated = fs::read_to_string(&generated_path)
         .map_err(|error| format!("failed to read {}: {error}", generated_path.display()))?;
     if actual_generated != expected_generated {
-        return Err("generated resource contract module is stale. run:\n\
+        return Err(("generated resource contract module is stale. run:\n\
              cargo run -p kibel-tools -- resource-contract write"
-            .to_string());
+            .to_string())
+        .into());
     }
 
     println!("resource contract check: ok");
     Ok(())
 }
 
-fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> Result<(), String> {
+fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> ToolResult<()> {
     let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
@@ -2393,14 +2439,14 @@ fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> Resu
 fn run_resource_contract_refresh_endpoint(
     root: &Path,
     args: &EndpointRefreshArgs,
-) -> Result<(), String> {
+) -> ToolResult<()> {
     let origin = args.origin.trim();
     if origin.is_empty() {
-        return Err("origin is required (use --origin or KIBELA_ORIGIN)".to_string());
+        return Err(("origin is required (use --origin or KIBELA_ORIGIN)".to_string()).into());
     }
     let token = args.token.trim();
     if token.is_empty() {
-        return Err("token is required (use --token or KIBELA_ACCESS_TOKEN)".to_string());
+        return Err(("token is required (use --token or KIBELA_ACCESS_TOKEN)".to_string()).into());
     }
 
     let endpoint = args
@@ -2424,42 +2470,54 @@ fn run_resource_contract_refresh_endpoint(
     Ok(())
 }
 
-fn load_normalized_snapshot_from_path(path: &Path) -> Result<NormalizedSnapshot, String> {
+fn load_normalized_snapshot_from_path(path: &Path) -> ToolResult<NormalizedSnapshot> {
     let payload = read_json(path)?;
     normalize_resource_snapshot(&payload)
 }
 
-fn run_resource_contract_diff(root: &Path, args: &ResourceContractDiffArgs) -> Result<(), String> {
+fn run_resource_contract_diff(root: &Path, args: &ResourceContractDiffArgs) -> ToolResult<()> {
     let base_path = resolve_path(root, &args.base);
     let target_path = resolve_path(root, &args.target);
     let base_snapshot = load_normalized_snapshot_from_path(&base_path)?;
     let target_snapshot = load_normalized_snapshot_from_path(&target_path)?;
     let diff = compute_resource_contract_diff(&base_snapshot, &target_snapshot);
 
-    if diff.breaking.is_empty() {
-        println!("resource contract diff: no breaking changes");
-    } else {
-        println!(
-            "resource contract diff: {} breaking change(s)",
-            diff.breaking.len()
-        );
-        for item in &diff.breaking {
-            println!("  - {item}");
-        }
-    }
+    match args.format {
+        DiffOutputFormat::Text => {
+            if diff.breaking.is_empty() {
+                println!("resource contract diff: no breaking changes");
+            } else {
+                println!(
+                    "resource contract diff: {} breaking change(s)",
+                    diff.breaking.len()
+                );
+                for item in &diff.breaking {
+                    println!("  - {item}");
+                }
+            }
 
-    if !diff.notes.is_empty() {
-        println!("resource contract diff notes:");
-        for item in &diff.notes {
-            println!("  - {item}");
+            if !diff.notes.is_empty() {
+                println!("resource contract diff notes:");
+                for item in &diff.notes {
+                    println!("  - {item}");
+                }
+            }
+        }
+        DiffOutputFormat::Json => {
+            let rendered = serde_json::to_string_pretty(&resource_contract_diff_json(&diff))
+                .map_err(|error| {
+                    ToolError::message(format!("failed to render diff json: {error}"))
+                })?;
+            println!("{rendered}");
         }
     }
 
     if args.fail_on_breaking && !diff.breaking.is_empty() {
-        return Err(format!(
+        return Err((format!(
             "resource contract diff detected {} breaking change(s)",
             diff.breaking.len()
-        ));
+        ))
+        .into());
     }
     Ok(())
 }

@@ -37,7 +37,7 @@ jobs:
 
       - name: Preserve base resource contract snapshot
         run: |
-          cp research/schema/resource_contracts.snapshot.json /tmp/resource_contracts.snapshot.base.json
+          cp schema/contracts/resource_contracts.snapshot.json /tmp/resource_contracts.snapshot.base.json
 
       - name: Refresh snapshots from live endpoint
         env:
@@ -56,7 +56,7 @@ jobs:
         run: |
           cargo run -p kibel-tools -- resource-contract diff \
             --base /tmp/resource_contracts.snapshot.base.json \
-            --target research/schema/resource_contracts.snapshot.json \
+            --target schema/contracts/resource_contracts.snapshot.json \
             --fail-on-breaking
 
       - name: Verify refreshed contracts

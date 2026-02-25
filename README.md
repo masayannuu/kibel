@@ -230,19 +230,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Create-note contract:
 
-- snapshot: `research/schema/create_note_contract.snapshot.json`
+- snapshot: `schema/contracts/create_note_contract.snapshot.json`
 - refresh from endpoint snapshot: `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 - check: `cargo run -p kibel-tools -- create-note-contract check`
 - update generated module: `cargo run -p kibel-tools -- create-note-contract write`
 
 All-resource contract:
 
-- endpoint snapshot source: `research/schema/resource_contracts.endpoint.snapshot.json`
-- normalized snapshot: `research/schema/resource_contracts.snapshot.json`
+- endpoint snapshot source: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+- normalized snapshot: `schema/contracts/resource_contracts.snapshot.json`
 - refresh endpoint snapshot (strict): `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
 - check (strict): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
 - update generated module (strict): `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
-- compatibility diff (blocking): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target research/schema/resource_contracts.snapshot.json --fail-on-breaking`
+- compatibility diff (blocking): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target schema/contracts/resource_contracts.snapshot.json --fail-on-breaking`
+- compatibility diff (machine-readable): `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
 - breakglass (temporary only): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass`
 
 ## Development Quality Gates

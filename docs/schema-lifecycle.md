@@ -2,9 +2,9 @@
 
 ## Versioning model
 
-- create-note contract snapshot: `research/schema/create_note_contract.snapshot.json`
-- endpoint introspection snapshot: `research/schema/resource_contracts.endpoint.snapshot.json`
-- all-resource contract snapshot: `research/schema/resource_contracts.snapshot.json`
+- create-note contract snapshot: `schema/contracts/create_note_contract.snapshot.json`
+- endpoint introspection snapshot: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+- all-resource contract snapshot: `schema/contracts/resource_contracts.snapshot.json`
 - generated modules:
   - `crates/kibel-client/src/generated_create_note_contract.rs`
   - `crates/kibel-client/src/generated_resource_contracts.rs`
@@ -48,8 +48,14 @@ cargo run -p kibel-tools -- resource-contract write --document-fallback-mode str
 # compatibility diff (blocking in CI)
 cargo run -p kibel-tools -- resource-contract diff \
   --base /tmp/base-resource-contracts.snapshot.json \
-  --target research/schema/resource_contracts.snapshot.json \
+  --target schema/contracts/resource_contracts.snapshot.json \
   --fail-on-breaking
+
+# compatibility diff (machine-readable for automation)
+cargo run -p kibel-tools -- resource-contract diff \
+  --format json \
+  --base /tmp/base-resource-contracts.snapshot.json \
+  --target schema/contracts/resource_contracts.snapshot.json
 
 # deterministic checks
 cargo run -p kibel-tools -- create-note-contract check

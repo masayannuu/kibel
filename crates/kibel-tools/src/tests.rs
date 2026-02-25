@@ -28,7 +28,7 @@ fn normalize_resource_snapshot_sorts_by_resource_name() {
         "schema_contract_version": 1,
         "source": {
             "mode": "endpoint_introspection_snapshot",
-            "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
             "captured_at": "2026-02-23T00:00:00Z",
             "origin": "https://example.kibe.la",
             "endpoint": "https://example.kibe.la/api/v1",
@@ -55,7 +55,7 @@ fn normalize_resource_snapshot_rejects_required_variables_outside_all_variables(
         "schema_contract_version": 1,
         "source": {
             "mode": "endpoint_introspection_snapshot",
-            "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
             "captured_at": "2026-02-23T00:00:00Z",
             "origin": "https://example.kibe.la",
             "endpoint": "https://example.kibe.la/api/v1",
@@ -68,7 +68,9 @@ fn normalize_resource_snapshot_rejects_required_variables_outside_all_variables(
 
     let error = normalize_resource_snapshot(&payload).expect_err("invalid required vars must fail");
     assert!(
-        error.contains("required vars not in all_variables"),
+        error
+            .to_string()
+            .contains("required vars not in all_variables"),
         "unexpected error: {error}"
     );
 }
@@ -285,7 +287,10 @@ fn parse_endpoint_snapshot_strict_rejects_missing_document() {
 
     let error = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Strict)
         .expect_err("strict mode should reject missing document");
-    assert!(error.contains("strict mode"), "unexpected error: {error}");
+    assert!(
+        error.to_string().contains("strict mode"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -376,7 +381,7 @@ fn compute_resource_contract_diff_detects_breaking_changes() {
         "schema_contract_version": 1,
         "source": {
             "mode": "endpoint_introspection_snapshot",
-            "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
             "captured_at": "2026-02-23T00:00:00Z",
             "origin": "https://example.kibe.la",
             "endpoint": "https://example.kibe.la/api/v1",
@@ -397,7 +402,7 @@ fn compute_resource_contract_diff_detects_breaking_changes() {
         "schema_contract_version": 1,
         "source": {
             "mode": "endpoint_introspection_snapshot",
-            "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
             "captured_at": "2026-02-24T00:00:00Z",
             "origin": "https://example.kibe.la",
             "endpoint": "https://example.kibe.la/api/v1",
@@ -437,5 +442,28 @@ fn compute_resource_contract_diff_detects_breaking_changes() {
             .any(|item| item.contains("required variable(s) removed")),
         "expected required variable removal in diff: {:?}",
         diff.breaking
+    );
+}
+
+#[test]
+fn resource_contract_diff_json_contains_counts_and_items() {
+    let diff = ResourceContractDiffResult {
+        breaking: vec!["breaking change".to_string()],
+        notes: vec!["non breaking note".to_string(), "another note".to_string()],
+    };
+    let payload = resource_contract_diff_json(&diff);
+    assert_eq!(
+        payload.get("breaking_count").and_then(Value::as_u64),
+        Some(1),
+        "breaking_count should reflect breaking item length"
+    );
+    assert_eq!(
+        payload.get("notes_count").and_then(Value::as_u64),
+        Some(2),
+        "notes_count should reflect notes length"
+    );
+    assert_eq!(
+        payload.pointer("/breaking/0").and_then(Value::as_str),
+        Some("breaking change")
     );
 }
