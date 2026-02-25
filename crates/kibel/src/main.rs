@@ -1690,10 +1690,12 @@ fn resolve_login_token(
 fn token_store_lookup_subjects(team: &str, origin: Option<&str>) -> Vec<String> {
     let mut subjects = Vec::new();
     if let Some(origin) = origin.and_then(normalize_origin_owned) {
-        subjects.push(token_store_subject(team, Some(&origin)));
+        let origin_scoped = token_store_subject(team, Some(&origin));
+        subjects.push(origin_scoped);
     }
-    if !subjects.iter().any(|subject| subject == team) {
-        subjects.push(team.to_string());
+    let legacy = token_store_subject(team, None);
+    if !subjects.iter().any(|subject| subject == &legacy) {
+        subjects.push(legacy);
     }
     subjects
 }
@@ -2107,6 +2109,18 @@ mod tests {
                 "example-team".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn token_store_lookup_subjects_returns_legacy_subject_without_origin() {
+        let subjects = token_store_lookup_subjects("example-team", None);
+        assert_eq!(subjects, vec!["example-team".to_string()]);
+    }
+
+    #[test]
+    fn token_store_lookup_subjects_filters_out_invalid_origin_without_scheme() {
+        let subjects = token_store_lookup_subjects("example-team", Some("example-team.kibe.la"));
+        assert_eq!(subjects, vec!["example-team".to_string()]);
     }
 
     #[test]
