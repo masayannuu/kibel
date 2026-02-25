@@ -19,6 +19,7 @@
         "sortBy"
       ],
       "client_method": "search_note",
+      "document": "query SearchNote(\n  $query: String!\n  $resources: [SearchResourceKind!]\n  $coediting: Boolean\n  $updated: SearchDate\n  $groupIds: [ID!]\n  $userIds: [ID!]\n  $folderIds: [ID!]\n  $likerIds: [ID!]\n  $isArchived: Boolean\n  $sortBy: SearchSortKind\n  $first: Int!\n) {\n  search(\n    query: $query\n    resources: $resources\n    coediting: $coediting\n    updated: $updated\n    groupIds: $groupIds\n    userIds: $userIds\n    folderIds: $folderIds\n    likerIds: $likerIds\n    isArchived: $isArchived\n    sortBy: $sortBy\n    first: $first\n  ) {\n    edges {\n      node {\n        document {\n          ... on Node {\n            id\n          }\n        }\n        title\n        url\n        contentSummaryHtml\n        path\n        author {\n          account\n          realName\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.search",
       "kind": "query",
       "name": "searchNote",
@@ -36,6 +37,7 @@
         "query"
       ],
       "client_method": "search_folder",
+      "document": "query SearchFolder($query: String!, $first: Int!) {\n  searchFolder(query: $query, first: $first) {\n    edges {\n      node {\n        name\n        fixedPath\n        group {\n          name\n          isPrivate\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.searchFolder",
       "kind": "query",
       "name": "searchFolder",
@@ -53,6 +55,7 @@
         "ability"
       ],
       "client_method": "get_groups",
+      "document": "query GetGroups($first: Int!) {\n  groups(first: $first) {\n    edges {\n      node {\n        id\n        name\n        isDefault\n        isArchived\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.groups",
       "kind": "query",
       "name": "getGroups",
@@ -70,6 +73,7 @@
         "active"
       ],
       "client_method": "get_folders",
+      "document": "query GetFolders($first: Int!) {\n  folders(first: $first) {\n    edges {\n      node {\n        id\n        name\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.folders",
       "kind": "query",
       "name": "getFolders",
@@ -87,6 +91,7 @@
         "active"
       ],
       "client_method": "get_notes",
+      "document": "query GetNotes($folderId: ID!, $first: Int!, $last: Int) {\n  notes(folderId: $folderId, first: $first, last: $last) {\n    edges {\n      node {\n        id\n        title\n        url\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.notes",
       "kind": "query",
       "name": "getNotes",
@@ -98,6 +103,7 @@
         "id"
       ],
       "client_method": "get_note",
+      "document": "query GetNote($id: ID!) {\n  note(id: $id) {\n    id\n    title\n    content\n  }\n}\n",
       "graphql_file": "endpoint:query.note",
       "kind": "query",
       "name": "getNote",
@@ -111,6 +117,7 @@
         "path"
       ],
       "client_method": "get_note_from_path",
+      "document": "query GetNoteFromPath($path: String!, $first: Int!) {\n  noteFromPath(path: $path) {\n    id\n    title\n    content\n    url\n    author {\n      account\n      realName\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n          fullName\n          fixedPath\n          group {\n            id\n            name\n          }\n        }\n      }\n    }\n    comments(first: $first) {\n      edges {\n        node {\n          id\n          anchor\n          content\n          author {\n            account\n            realName\n          }\n          replies(first: $first) {\n            edges {\n              node {\n                id\n                anchor\n                content\n                author {\n                  account\n                  realName\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n    inlineComments(first: $first) {\n      edges {\n        node {\n          id\n          anchor\n          content\n          author {\n            account\n            realName\n          }\n          replies(first: $first) {\n            edges {\n              node {\n                id\n                anchor\n                content\n                author {\n                  account\n                  realName\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.noteFromPath",
       "kind": "query",
       "name": "getNoteFromPath",
@@ -124,6 +131,7 @@
         "id"
       ],
       "client_method": "get_folder",
+      "document": "query GetFolder($id: ID!, $first: Int!) {\n  folder(id: $id) {\n    name\n    fullName\n    fixedPath\n    createdAt\n    updatedAt\n    group {\n      id\n      name\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n        }\n      }\n    }\n    notes(first: $first) {\n      edges {\n        node {\n          id\n          title\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.folder",
       "kind": "query",
       "name": "getFolder",
@@ -137,6 +145,7 @@
         "path"
       ],
       "client_method": "get_folder_from_path",
+      "document": "query GetFolderFromPath($path: String!, $first: Int!) {\n  folderFromPath(path: $path) {\n    name\n    fullName\n    fixedPath\n    createdAt\n    updatedAt\n    group {\n      id\n      name\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n        }\n      }\n    }\n    notes(first: $first) {\n      edges {\n        node {\n          id\n          title\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.folderFromPath",
       "kind": "query",
       "name": "getFolderFromPath",
@@ -153,6 +162,7 @@
         "after"
       ],
       "client_method": "get_feed_sections",
+      "document": "query GetFeedSections($kind: FeedKind!, $groupId: ID!, $first: Int!) {\n  feedSections(kind: $kind, groupId: $groupId, first: $first) {\n    edges {\n      node {\n        ... on FeedNote {\n          date\n          note {\n            id\n            title\n            contentSummaryHtml\n          }\n        }\n        ... on FeedFolderParcel {\n          date\n          folder {\n            id\n            name\n          }\n          notes(first: $first) {\n            edges {\n              node {\n                id\n                title\n                contentSummaryHtml\n              }\n            }\n          }\n        }\n        ... on FeedUserParcel {\n          date\n          user {\n            account\n            realName\n          }\n          notes(first: $first) {\n            edges {\n              node {\n                id\n                title\n                contentSummaryHtml\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}\n",
       "graphql_file": "endpoint:query.feedSections",
       "kind": "query",
       "name": "getFeedSections",
@@ -166,6 +176,7 @@
         "input"
       ],
       "client_method": "create_note",
+      "document": "mutation CreateNote($input: CreateNoteInput!) {\n  createNote(input: $input) {\n    clientMutationId\n    note {\n      id\n      title\n      content\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.createNote",
       "kind": "mutation",
       "name": "createNote",
@@ -179,6 +190,7 @@
         "input"
       ],
       "client_method": "create_comment",
+      "document": "mutation CreateComment($input: CreateCommentInput!) {\n  createComment(input: $input) {\n    comment {\n      id\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.createComment",
       "kind": "mutation",
       "name": "createComment",
@@ -192,6 +204,7 @@
         "input"
       ],
       "client_method": "create_comment_reply",
+      "document": "mutation CreateCommentReply($input: CreateCommentReplyInput!) {\n  createCommentReply(input: $input) {\n    reply {\n      id\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.createCommentReply",
       "kind": "mutation",
       "name": "createCommentReply",
@@ -205,6 +218,7 @@
         "input"
       ],
       "client_method": "create_folder",
+      "document": "mutation CreateFolder($input: CreateFolderInput!) {\n  createFolder(input: $input) {\n    folder {\n      id\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.createFolder",
       "kind": "mutation",
       "name": "createFolder",
@@ -218,6 +232,7 @@
         "input"
       ],
       "client_method": "move_note_to_another_folder",
+      "document": "mutation MoveNoteToAnotherFolder($input: MoveNoteToAnotherFolderInput!) {\n  moveNoteToAnotherFolder(input: $input) {\n    note {\n      id\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.moveNoteToAnotherFolder",
       "kind": "mutation",
       "name": "moveNoteToAnotherFolder",
@@ -231,6 +246,7 @@
         "input"
       ],
       "client_method": "attach_note_to_folder",
+      "document": "mutation AttachNoteToFolder($input: AttachNoteToFolderInput!) {\n  attachNoteToFolder(input: $input) {\n    note {\n      id\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.attachNoteToFolder",
       "kind": "mutation",
       "name": "attachNoteToFolder",
@@ -244,6 +260,7 @@
         "input"
       ],
       "client_method": "update_note",
+      "document": "mutation UpdateNoteContent($input: UpdateNoteContentInput!) {\n  updateNoteContent(input: $input) {\n    note {\n      id\n      title\n      content\n    }\n  }\n}\n",
       "graphql_file": "endpoint:mutation.updateNoteContent",
       "kind": "mutation",
       "name": "updateNoteContent",

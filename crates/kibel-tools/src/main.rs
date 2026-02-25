@@ -16,17 +16,11 @@ query EndpointIntrospection {
           name
           defaultValue
           type {
-            kind
-            name
-            ofType {
-              kind
-              name
-              ofType {
-                kind
-                name
-              }
-            }
+            ...TypeRef
           }
+        }
+        type {
+          ...TypeRef
         }
       }
     }
@@ -37,6 +31,56 @@ query EndpointIntrospection {
           name
           defaultValue
           type {
+            ...TypeRef
+          }
+        }
+        type {
+          ...TypeRef
+        }
+      }
+    }
+    types {
+      kind
+      name
+      fields {
+        name
+        args {
+          name
+          defaultValue
+          type {
+            ...TypeRef
+          }
+        }
+        type {
+          ...TypeRef
+        }
+      }
+      possibleTypes {
+        name
+      }
+      enumValues {
+        name
+      }
+    }
+  }
+}
+
+fragment TypeRef on __Type {
+  kind
+  name
+  ofType {
+    kind
+    name
+    ofType {
+      kind
+      name
+      ofType {
+        kind
+        name
+        ofType {
+          kind
+          name
+          ofType {
             kind
             name
             ofType {
@@ -324,6 +368,7 @@ struct NormalizedResource {
     required_variables: Vec<String>,
     graphql_file: String,
     client_method: String,
+    document: String,
 }
 
 #[derive(Debug, Clone)]
@@ -350,6 +395,7 @@ struct EndpointResource {
     client_method: String,
     all_variables: Vec<String>,
     required_variables: Vec<String>,
+    document: String,
 }
 
 fn main() -> ExitCode {
@@ -489,6 +535,36 @@ fn collect_graphql_name_list(value: &Value, context: &str) -> Result<Vec<String>
 struct GraphqlArg {
     name: String,
     required: bool,
+    type_ref: GraphqlTypeRef,
+    rendered_type: String,
+}
+
+#[derive(Debug, Clone)]
+struct GraphqlFieldSpec {
+    args: Vec<GraphqlArg>,
+    return_type: GraphqlTypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GraphqlTypeRef {
+    kind: String,
+    name: Option<String>,
+    of_type: Option<Box<GraphqlTypeRef>>,
+}
+
+#[derive(Debug, Clone)]
+struct GraphqlFieldDefinition {
+    name: String,
+    args: Vec<GraphqlArg>,
+    type_ref: GraphqlTypeRef,
+}
+
+#[derive(Debug, Clone)]
+struct GraphqlTypeDefinition {
+    kind: String,
+    fields: Vec<GraphqlFieldDefinition>,
+    possible_types: Vec<String>,
+    enum_values: Vec<String>,
 }
 
 fn fetch_introspection_payload(
@@ -569,7 +645,7 @@ fn extract_graphql_error_message(payload: &Value) -> Option<String> {
 fn parse_graphql_fields(
     payload: &Value,
     kind: &str,
-) -> Result<HashMap<String, Vec<GraphqlArg>>, String> {
+) -> Result<HashMap<String, GraphqlFieldSpec>, String> {
     let pointer = match kind {
         "query" => "/data/__schema/queryType/fields",
         "mutation" => "/data/__schema/mutationType/fields",
@@ -588,6 +664,12 @@ fn parse_graphql_fields(
             .as_object()
             .ok_or_else(|| format!("{context} must be an object"))?;
         let name = get_trimmed_string(object, "name", &context)?;
+        let return_type = parse_graphql_type_ref(
+            object
+                .get("type")
+                .ok_or_else(|| format!("{context} missing type"))?,
+            &format!("{context}.type"),
+        )?;
         let args = object
             .get("args")
             .and_then(Value::as_array)
@@ -601,12 +683,27 @@ fn parse_graphql_fields(
                 .ok_or_else(|| format!("{arg_context} must be an object"))?;
             let arg_name = get_trimmed_string(arg_object, "name", &arg_context)?;
             let required = arg_is_required(arg_object, &arg_context)?;
+            let type_ref = parse_graphql_type_ref(
+                arg_object
+                    .get("type")
+                    .ok_or_else(|| format!("{arg_context} missing type"))?,
+                &format!("{arg_context}.type"),
+            )?;
+            let rendered_type = render_graphql_type_ref(&type_ref);
             parsed_args.push(GraphqlArg {
                 name: arg_name,
                 required,
+                type_ref,
+                rendered_type,
             });
         }
-        result.insert(name, parsed_args);
+        result.insert(
+            name,
+            GraphqlFieldSpec {
+                args: parsed_args,
+                return_type,
+            },
+        );
     }
 
     Ok(result)
@@ -619,12 +716,422 @@ fn arg_is_required(
     let type_value = arg_object
         .get("type")
         .ok_or_else(|| format!("{context} missing type"))?;
-    let kind = type_value
-        .get("kind")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("{context} type.kind missing"))?;
+    let kind = type_value.get("kind").and_then(Value::as_str).unwrap_or("");
     let default_value = arg_object.get("defaultValue");
     Ok(kind == "NON_NULL" && default_value.is_none_or(|value| value.is_null()))
+}
+
+fn parse_graphql_type_ref(value: &Value, context: &str) -> Result<GraphqlTypeRef, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| format!("{context} must be an object"))?;
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{context} missing kind"))?
+        .trim()
+        .to_string();
+    if kind.is_empty() {
+        return Err(format!("{context} kind is empty"));
+    }
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let of_type = object
+        .get("ofType")
+        .filter(|child| !child.is_null())
+        .map(|child| parse_graphql_type_ref(child, &format!("{context}.ofType")))
+        .transpose()?
+        .map(Box::new);
+    Ok(GraphqlTypeRef {
+        kind,
+        name,
+        of_type,
+    })
+}
+
+fn render_graphql_type_ref(type_ref: &GraphqlTypeRef) -> String {
+    match type_ref.kind.as_str() {
+        "NON_NULL" => type_ref
+            .of_type
+            .as_deref()
+            .map(render_graphql_type_ref)
+            .map(|inner| format!("{inner}!"))
+            .unwrap_or_else(|| "JSON!".to_string()),
+        "LIST" => type_ref
+            .of_type
+            .as_deref()
+            .map(render_graphql_type_ref)
+            .map(|inner| format!("[{inner}]"))
+            .unwrap_or_else(|| "[JSON]".to_string()),
+        _ => type_ref.name.clone().unwrap_or_else(|| "JSON".to_string()),
+    }
+}
+
+fn parse_schema_types(payload: &Value) -> Result<HashMap<String, GraphqlTypeDefinition>, String> {
+    let Some(types) = payload.pointer("/data/__schema/types") else {
+        return Ok(HashMap::new());
+    };
+    let items = types
+        .as_array()
+        .ok_or_else(|| "/data/__schema/types must be an array".to_string())?;
+    let mut result = HashMap::new();
+    for (index, item) in items.iter().enumerate() {
+        let context = format!("types[{index}]");
+        let object = item
+            .as_object()
+            .ok_or_else(|| format!("{context} must be object"))?;
+        let Some(name) = object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let kind = object
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("UNKNOWN")
+            .to_string();
+        let mut fields = Vec::new();
+        if let Some(field_items) = object.get("fields").and_then(Value::as_array) {
+            for (field_index, field_item) in field_items.iter().enumerate() {
+                let field_context = format!("{context}.fields[{field_index}]");
+                let field_object = field_item
+                    .as_object()
+                    .ok_or_else(|| format!("{field_context} must be object"))?;
+                let field_name = get_trimmed_string(field_object, "name", &field_context)?;
+                let field_type = parse_graphql_type_ref(
+                    field_object
+                        .get("type")
+                        .ok_or_else(|| format!("{field_context} missing type"))?,
+                    &format!("{field_context}.type"),
+                )?;
+                let mut field_args = Vec::new();
+                let args = field_object
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .map(|value| value.as_slice())
+                    .unwrap_or(&[]);
+                for (arg_index, arg_item) in args.iter().enumerate() {
+                    let arg_context = format!("{field_context}.args[{arg_index}]");
+                    let arg_object = arg_item
+                        .as_object()
+                        .ok_or_else(|| format!("{arg_context} must be object"))?;
+                    let arg_name = get_trimmed_string(arg_object, "name", &arg_context)?;
+                    let required = arg_is_required(arg_object, &arg_context)?;
+                    let arg_type = parse_graphql_type_ref(
+                        arg_object
+                            .get("type")
+                            .ok_or_else(|| format!("{arg_context} missing type"))?,
+                        &format!("{arg_context}.type"),
+                    )?;
+                    let rendered_type = render_graphql_type_ref(&arg_type);
+                    field_args.push(GraphqlArg {
+                        name: arg_name,
+                        required,
+                        type_ref: arg_type,
+                        rendered_type,
+                    });
+                }
+                fields.push(GraphqlFieldDefinition {
+                    name: field_name,
+                    args: field_args,
+                    type_ref: field_type,
+                });
+            }
+        }
+        let possible_types = object
+            .get("possibleTypes")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(Value::as_str))
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let enum_values = object
+            .get("enumValues")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(Value::as_str))
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        result.insert(
+            name.to_string(),
+            GraphqlTypeDefinition {
+                kind,
+                fields,
+                possible_types,
+                enum_values,
+            },
+        );
+    }
+    Ok(result)
+}
+
+fn resolve_named_type(type_ref: &GraphqlTypeRef) -> Option<&str> {
+    if let Some(name) = type_ref.name.as_deref() {
+        return Some(name);
+    }
+    type_ref.of_type.as_deref().and_then(resolve_named_type)
+}
+
+fn unwrap_non_null(type_ref: &GraphqlTypeRef) -> &GraphqlTypeRef {
+    if type_ref.kind == "NON_NULL" {
+        return type_ref.of_type.as_deref().unwrap_or(type_ref);
+    }
+    type_ref
+}
+
+fn terminal_field_candidates() -> &'static [&'static str] {
+    &[
+        "id",
+        "title",
+        "name",
+        "fullName",
+        "fixedPath",
+        "url",
+        "content",
+        "contentSummaryHtml",
+        "path",
+        "account",
+        "realName",
+        "date",
+        "anchor",
+        "createdAt",
+        "updatedAt",
+        "__typename",
+    ]
+}
+
+fn render_terminal_fields(type_def: &GraphqlTypeDefinition) -> String {
+    let mut fields = Vec::new();
+    for candidate in terminal_field_candidates() {
+        if type_def.fields.iter().any(|field| field.name == *candidate) {
+            fields.push((*candidate).to_string());
+        }
+    }
+    if fields.is_empty() && !type_def.fields.is_empty() {
+        fields.push(type_def.fields[0].name.clone());
+    }
+    if fields.is_empty() {
+        fields.push("__typename".to_string());
+    }
+    fields.join("\n")
+}
+
+fn required_arg_literal(
+    type_ref: &GraphqlTypeRef,
+    type_map: &HashMap<String, GraphqlTypeDefinition>,
+) -> Option<String> {
+    let type_ref = unwrap_non_null(type_ref);
+    match type_ref.kind.as_str() {
+        "LIST" => Some("[]".to_string()),
+        "SCALAR" => match type_ref.name.as_deref().unwrap_or("") {
+            "Int" => Some("16".to_string()),
+            "Float" => Some("1.0".to_string()),
+            "Boolean" => Some("false".to_string()),
+            "ID" | "String" => Some("\"stub\"".to_string()),
+            _ => None,
+        },
+        "ENUM" => type_ref.name.as_deref().and_then(|name| {
+            type_map
+                .get(name)
+                .and_then(|value| value.enum_values.first())
+                .cloned()
+        }),
+        _ => None,
+    }
+}
+
+fn render_required_args(
+    args: &[GraphqlArg],
+    type_map: &HashMap<String, GraphqlTypeDefinition>,
+) -> Option<String> {
+    let mut rendered = Vec::new();
+    for arg in args {
+        if !arg.required {
+            continue;
+        }
+        let literal = required_arg_literal(&arg.type_ref, type_map)?;
+        rendered.push(format!("{}: {literal}", arg.name));
+    }
+    Some(rendered.join(", "))
+}
+
+fn render_selection_set(
+    type_ref: &GraphqlTypeRef,
+    type_map: &HashMap<String, GraphqlTypeDefinition>,
+    stack: &mut Vec<String>,
+    depth: usize,
+    max_depth: usize,
+) -> Option<String> {
+    let named = resolve_named_type(type_ref)?;
+    let type_def = type_map.get(named)?;
+    match type_def.kind.as_str() {
+        "SCALAR" | "ENUM" => None,
+        "UNION" => {
+            let mut fragments = vec!["__typename".to_string()];
+            if depth >= max_depth {
+                return Some(fragments.join("\n"));
+            }
+            for possible_type in &type_def.possible_types {
+                if let Some(possible_def) = type_map.get(possible_type) {
+                    let inner = render_terminal_fields(possible_def);
+                    fragments.push(format!(
+                        "... on {possible_type} {{\n{}\n}}",
+                        indent_block(&inner, 2)
+                    ));
+                }
+            }
+            Some(fragments.join("\n"))
+        }
+        _ => {
+            if depth >= max_depth || stack.iter().any(|entry| entry == named) {
+                return Some(render_terminal_fields(type_def));
+            }
+            stack.push(named.to_string());
+            let mut selected_fields = Vec::new();
+            for field in &type_def.fields {
+                if field.name.starts_with("__") {
+                    continue;
+                }
+                let required_args = match render_required_args(&field.args, type_map) {
+                    Some(value) => value,
+                    None => continue,
+                };
+                let field_head = if required_args.is_empty() {
+                    field.name.clone()
+                } else {
+                    format!("{}({required_args})", field.name)
+                };
+                if let Some(child_selection) =
+                    render_selection_set(&field.type_ref, type_map, stack, depth + 1, max_depth)
+                {
+                    selected_fields.push(format!(
+                        "{field_head} {{\n{}\n}}",
+                        indent_block(&child_selection, 2)
+                    ));
+                } else {
+                    selected_fields.push(field_head);
+                }
+            }
+            stack.pop();
+            if selected_fields.is_empty() {
+                Some(render_terminal_fields(type_def))
+            } else {
+                Some(selected_fields.join("\n"))
+            }
+        }
+    }
+}
+
+fn indent_block(value: &str, spaces: usize) -> String {
+    let pad = " ".repeat(spaces);
+    value
+        .lines()
+        .map(|line| format!("{pad}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_operation_document(
+    definition: &ResourceDefinition,
+    field_spec: &GraphqlFieldSpec,
+    type_map: &HashMap<String, GraphqlTypeDefinition>,
+) -> Option<String> {
+    let mut variable_defs = Vec::new();
+    let mut call_args = Vec::new();
+    for arg in &field_spec.args {
+        variable_defs.push(format!("${}: {}", arg.name, arg.rendered_type));
+        call_args.push(format!("{}: ${}", arg.name, arg.name));
+    }
+    let variable_defs_raw = variable_defs.join(", ");
+    let call_args_raw = call_args.join(", ");
+    let field_head = if call_args_raw.is_empty() {
+        definition.field.to_string()
+    } else {
+        format!("{}({call_args_raw})", definition.field)
+    };
+    let mut stack = Vec::new();
+    let selection = render_selection_set(&field_spec.return_type, type_map, &mut stack, 0, 8);
+    let root_block = if let Some(selection) = selection {
+        format!("{field_head} {{\n{}\n  }}", indent_block(&selection, 4))
+    } else {
+        field_head
+    };
+    let operation = to_pascal_case(definition.name);
+    let operation_kind = if definition.kind == "mutation" {
+        "mutation"
+    } else {
+        "query"
+    };
+    if variable_defs_raw.is_empty() {
+        Some(format!(
+            "{operation_kind} {operation} {{\n  {root_block}\n}}"
+        ))
+    } else {
+        Some(format!(
+            "{operation_kind} {operation}({variable_defs_raw}) {{\n  {root_block}\n}}"
+        ))
+    }
+}
+
+fn legacy_operation_document(resource_name: &str) -> Option<&'static str> {
+    match resource_name {
+        "searchNote" => Some(include_str!("../operation_documents/search_note.graphql")),
+        "searchFolder" => Some(include_str!("../operation_documents/search_folder.graphql")),
+        "getGroups" => Some(include_str!("../operation_documents/get_groups.graphql")),
+        "getFolders" => Some(include_str!("../operation_documents/get_folders.graphql")),
+        "getNotes" => Some(include_str!("../operation_documents/get_notes.graphql")),
+        "getNote" => Some(include_str!("../operation_documents/get_note.graphql")),
+        "getNoteFromPath" => Some(include_str!(
+            "../operation_documents/get_note_from_path.graphql"
+        )),
+        "getFolder" => Some(include_str!("../operation_documents/get_folder.graphql")),
+        "getFolderFromPath" => Some(include_str!(
+            "../operation_documents/get_folder_from_path.graphql"
+        )),
+        "getFeedSections" => Some(include_str!(
+            "../operation_documents/get_feed_sections.graphql"
+        )),
+        "createNote" => Some(include_str!("../operation_documents/create_note.graphql")),
+        "createComment" => Some(include_str!(
+            "../operation_documents/create_comment.graphql"
+        )),
+        "createCommentReply" => Some(include_str!(
+            "../operation_documents/create_comment_reply.graphql"
+        )),
+        "createFolder" => Some(include_str!("../operation_documents/create_folder.graphql")),
+        "moveNoteToAnotherFolder" => Some(include_str!(
+            "../operation_documents/move_note_to_another_folder.graphql"
+        )),
+        "attachNoteToFolder" => Some(include_str!(
+            "../operation_documents/attach_note_to_folder.graphql"
+        )),
+        "updateNoteContent" => Some(include_str!(
+            "../operation_documents/update_note_content.graphql"
+        )),
+        _ => None,
+    }
 }
 
 fn get_trimmed_string(
@@ -930,6 +1437,7 @@ fn build_endpoint_snapshot_from_introspection(
 ) -> Result<Value, String> {
     let query_fields = parse_graphql_fields(payload, "query")?;
     let mutation_fields = parse_graphql_fields(payload, "mutation")?;
+    let type_map = parse_schema_types(payload)?;
 
     let mut resources = Vec::new();
     for definition in definitions {
@@ -938,14 +1446,14 @@ fn build_endpoint_snapshot_from_introspection(
             "mutation" => &mutation_fields,
             other => return Err(format!("unsupported kind: {other}")),
         };
-        let args = fields
+        let field_spec = fields
             .get(definition.field)
             .ok_or_else(|| format!("missing graphql field: {}", definition.field))?;
 
         let mut all_variables = Vec::new();
         let mut required_variables = Vec::new();
         let mut seen = HashSet::new();
-        for arg in args {
+        for arg in &field_spec.args {
             if !seen.insert(arg.name.clone()) {
                 continue;
             }
@@ -954,6 +1462,9 @@ fn build_endpoint_snapshot_from_introspection(
                 required_variables.push(arg.name.clone());
             }
         }
+        let document = build_operation_document(definition, field_spec, &type_map)
+            .or_else(|| legacy_operation_document(definition.name).map(str::to_string))
+            .ok_or_else(|| format!("failed to build operation document: {}", definition.name))?;
 
         resources.push(json!({
             "name": definition.name,
@@ -963,6 +1474,7 @@ fn build_endpoint_snapshot_from_introspection(
             "client_method": definition.client_method,
             "all_variables": all_variables,
             "required_variables": required_variables,
+            "document": document,
         }));
     }
 
@@ -1031,6 +1543,14 @@ fn load_endpoint_snapshot(path: &Path) -> Result<EndpointSnapshot, String> {
                 .ok_or_else(|| format!("{context} missing `required_variables`"))?,
             &format!("{context}.required_variables"),
         )?;
+        let document = object
+            .get("document")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| legacy_operation_document(&name).map(str::to_string))
+            .ok_or_else(|| format!("resource `{name}` missing `document`"))?;
 
         let all_set = all_variables.iter().collect::<HashSet<_>>();
         let missing_required = required_variables
@@ -1054,6 +1574,7 @@ fn load_endpoint_snapshot(path: &Path) -> Result<EndpointSnapshot, String> {
                 client_method,
                 all_variables,
                 required_variables,
+                document,
             },
         );
     }
@@ -1131,6 +1652,7 @@ fn build_resource_snapshot_value(
             "required_variables": item.required_variables,
             "graphql_file": format!("endpoint:{}.{}", item.kind, item.field),
             "client_method": item.client_method,
+            "document": item.document,
         }));
     }
 
@@ -1238,6 +1760,7 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
         "required_variables",
         "graphql_file",
         "client_method",
+        "document",
     ] {
         if !object.contains_key(key) {
             return Err(format!("{context} is missing `{key}`"));
@@ -1255,6 +1778,7 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
     let operation = get_trimmed_string(object, "operation", context)?;
     let graphql_file = get_trimmed_string(object, "graphql_file", context)?;
     let client_method = get_trimmed_string(object, "client_method", context)?;
+    let document = get_trimmed_string(object, "document", context)?;
     let all_variables = normalize_string_list(
         object
             .get("all_variables")
@@ -1288,6 +1812,7 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
         required_variables,
         graphql_file,
         client_method,
+        document,
     })
 }
 
@@ -1382,6 +1907,7 @@ fn render_resource_contract(resource: &NormalizedResource) -> String {
             "        client_method: {},",
             rust_string(&resource.client_method)
         ),
+        format!("        document: {},", rust_string(&resource.document)),
         "    },".to_string(),
     ]
     .join("\n")
@@ -1405,6 +1931,7 @@ fn render_resource_module(snapshot: &ResourceModuleSnapshot) -> String {
         "    pub required_variables: &'static [&'static str],".to_string(),
         "    pub graphql_file: &'static str,".to_string(),
         "    pub client_method: &'static str,".to_string(),
+        "    pub document: &'static str,".to_string(),
         "}".to_string(),
         String::new(),
         format!(
@@ -1586,6 +2113,7 @@ mod tests {
             "required_variables": required_variables,
             "graphql_file": format!("endpoint:query.{name}"),
             "client_method": name,
+            "document": format!("query {name} {{ {name} }}"),
         })
     }
 
@@ -1682,7 +2210,12 @@ mod tests {
                                             "ofType": null
                                         }
                                     }
-                                ]
+                                ],
+                                "type": {
+                                    "kind": "OBJECT",
+                                    "name": "SearchConnection",
+                                    "ofType": null
+                                }
                             }
                         ]
                     },
@@ -1704,7 +2237,12 @@ mod tests {
                                             }
                                         }
                                     }
-                                ]
+                                ],
+                                "type": {
+                                    "kind": "OBJECT",
+                                    "name": "CreateNotePayload",
+                                    "ofType": null
+                                }
                             }
                         ]
                     }
@@ -1747,6 +2285,13 @@ mod tests {
             .and_then(Value::as_array)
             .expect("required_variables should be array");
         assert_eq!(required, &vec![Value::String("query".to_string())]);
+        assert!(
+            search
+                .get("document")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.contains("query SearchNote")),
+            "generated snapshot should include document"
+        );
     }
 
     #[test]

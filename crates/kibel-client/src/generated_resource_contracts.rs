@@ -10,6 +10,7 @@ pub struct ResourceContract {
     pub required_variables: &'static [&'static str],
     pub graphql_file: &'static str,
     pub client_method: &'static str,
+    pub document: &'static str,
 }
 
 pub const RESOURCE_CONTRACT_VERSION: u32 = 1;
@@ -39,6 +40,51 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["query"],
         graphql_file: "endpoint:query.search",
         client_method: "search_note",
+        document: "query SearchNote(
+  $query: String!
+  $resources: [SearchResourceKind!]
+  $coediting: Boolean
+  $updated: SearchDate
+  $groupIds: [ID!]
+  $userIds: [ID!]
+  $folderIds: [ID!]
+  $likerIds: [ID!]
+  $isArchived: Boolean
+  $sortBy: SearchSortKind
+  $first: Int!
+) {
+  search(
+    query: $query
+    resources: $resources
+    coediting: $coediting
+    updated: $updated
+    groupIds: $groupIds
+    userIds: $userIds
+    folderIds: $folderIds
+    likerIds: $likerIds
+    isArchived: $isArchived
+    sortBy: $sortBy
+    first: $first
+  ) {
+    edges {
+      node {
+        document {
+          ... on Node {
+            id
+          }
+        }
+        title
+        url
+        contentSummaryHtml
+        path
+        author {
+          account
+          realName
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "searchFolder",
@@ -48,6 +94,20 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["query"],
         graphql_file: "endpoint:query.searchFolder",
         client_method: "search_folder",
+        document: "query SearchFolder($query: String!, $first: Int!) {
+  searchFolder(query: $query, first: $first) {
+    edges {
+      node {
+        name
+        fixedPath
+        group {
+          name
+          isPrivate
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getGroups",
@@ -57,6 +117,18 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &[],
         graphql_file: "endpoint:query.groups",
         client_method: "get_groups",
+        document: "query GetGroups($first: Int!) {
+  groups(first: $first) {
+    edges {
+      node {
+        id
+        name
+        isDefault
+        isArchived
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getFolders",
@@ -74,6 +146,16 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &[],
         graphql_file: "endpoint:query.folders",
         client_method: "get_folders",
+        document: "query GetFolders($first: Int!) {
+  folders(first: $first) {
+    edges {
+      node {
+        id
+        name
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getNotes",
@@ -85,6 +167,17 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &[],
         graphql_file: "endpoint:query.notes",
         client_method: "get_notes",
+        document: "query GetNotes($folderId: ID!, $first: Int!, $last: Int) {
+  notes(folderId: $folderId, first: $first, last: $last) {
+    edges {
+      node {
+        id
+        title
+        url
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getNote",
@@ -94,6 +187,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["id"],
         graphql_file: "endpoint:query.note",
         client_method: "get_note",
+        document: "query GetNote($id: ID!) {
+  note(id: $id) {
+    id
+    title
+    content
+  }
+}",
     },
     ResourceContract {
         name: "getNoteFromPath",
@@ -103,6 +203,84 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["path"],
         graphql_file: "endpoint:query.noteFromPath",
         client_method: "get_note_from_path",
+        document: "query GetNoteFromPath($path: String!, $first: Int!) {
+  noteFromPath(path: $path) {
+    id
+    title
+    content
+    url
+    author {
+      account
+      realName
+    }
+    folders(first: $first) {
+      edges {
+        node {
+          id
+          name
+          fullName
+          fixedPath
+          group {
+            id
+            name
+          }
+        }
+      }
+    }
+    comments(first: $first) {
+      edges {
+        node {
+          id
+          anchor
+          content
+          author {
+            account
+            realName
+          }
+          replies(first: $first) {
+            edges {
+              node {
+                id
+                anchor
+                content
+                author {
+                  account
+                  realName
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    inlineComments(first: $first) {
+      edges {
+        node {
+          id
+          anchor
+          content
+          author {
+            account
+            realName
+          }
+          replies(first: $first) {
+            edges {
+              node {
+                id
+                anchor
+                content
+                author {
+                  account
+                  realName
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getFolder",
@@ -112,6 +290,35 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["id"],
         graphql_file: "endpoint:query.folder",
         client_method: "get_folder",
+        document: "query GetFolder($id: ID!, $first: Int!) {
+  folder(id: $id) {
+    name
+    fullName
+    fixedPath
+    createdAt
+    updatedAt
+    group {
+      id
+      name
+    }
+    folders(first: $first) {
+      edges {
+        node {
+          id
+          name
+        }
+      }
+    }
+    notes(first: $first) {
+      edges {
+        node {
+          id
+          title
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getFolderFromPath",
@@ -121,6 +328,35 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["path"],
         graphql_file: "endpoint:query.folderFromPath",
         client_method: "get_folder_from_path",
+        document: "query GetFolderFromPath($path: String!, $first: Int!) {
+  folderFromPath(path: $path) {
+    name
+    fullName
+    fixedPath
+    createdAt
+    updatedAt
+    group {
+      id
+      name
+    }
+    folders(first: $first) {
+      edges {
+        node {
+          id
+          name
+        }
+      }
+    }
+    notes(first: $first) {
+      edges {
+        node {
+          id
+          title
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "getFeedSections",
@@ -130,6 +366,54 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["first"],
         graphql_file: "endpoint:query.feedSections",
         client_method: "get_feed_sections",
+        document: "query GetFeedSections($kind: FeedKind!, $groupId: ID!, $first: Int!) {
+  feedSections(kind: $kind, groupId: $groupId, first: $first) {
+    edges {
+      node {
+        ... on FeedNote {
+          date
+          note {
+            id
+            title
+            contentSummaryHtml
+          }
+        }
+        ... on FeedFolderParcel {
+          date
+          folder {
+            id
+            name
+          }
+          notes(first: $first) {
+            edges {
+              node {
+                id
+                title
+                contentSummaryHtml
+              }
+            }
+          }
+        }
+        ... on FeedUserParcel {
+          date
+          user {
+            account
+            realName
+          }
+          notes(first: $first) {
+            edges {
+              node {
+                id
+                title
+                contentSummaryHtml
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}",
     },
     ResourceContract {
         name: "createNote",
@@ -139,6 +423,16 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.createNote",
         client_method: "create_note",
+        document: "mutation CreateNote($input: CreateNoteInput!) {
+  createNote(input: $input) {
+    clientMutationId
+    note {
+      id
+      title
+      content
+    }
+  }
+}",
     },
     ResourceContract {
         name: "createComment",
@@ -148,6 +442,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.createComment",
         client_method: "create_comment",
+        document: "mutation CreateComment($input: CreateCommentInput!) {
+  createComment(input: $input) {
+    comment {
+      id
+    }
+  }
+}",
     },
     ResourceContract {
         name: "createCommentReply",
@@ -157,6 +458,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.createCommentReply",
         client_method: "create_comment_reply",
+        document: "mutation CreateCommentReply($input: CreateCommentReplyInput!) {
+  createCommentReply(input: $input) {
+    reply {
+      id
+    }
+  }
+}",
     },
     ResourceContract {
         name: "createFolder",
@@ -166,6 +474,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.createFolder",
         client_method: "create_folder",
+        document: "mutation CreateFolder($input: CreateFolderInput!) {
+  createFolder(input: $input) {
+    folder {
+      id
+    }
+  }
+}",
     },
     ResourceContract {
         name: "moveNoteToAnotherFolder",
@@ -175,6 +490,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.moveNoteToAnotherFolder",
         client_method: "move_note_to_another_folder",
+        document: "mutation MoveNoteToAnotherFolder($input: MoveNoteToAnotherFolderInput!) {
+  moveNoteToAnotherFolder(input: $input) {
+    note {
+      id
+    }
+  }
+}",
     },
     ResourceContract {
         name: "attachNoteToFolder",
@@ -184,6 +506,13 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.attachNoteToFolder",
         client_method: "attach_note_to_folder",
+        document: "mutation AttachNoteToFolder($input: AttachNoteToFolderInput!) {
+  attachNoteToFolder(input: $input) {
+    note {
+      id
+    }
+  }
+}",
     },
     ResourceContract {
         name: "updateNoteContent",
@@ -193,6 +522,15 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         required_variables: &["input"],
         graphql_file: "endpoint:mutation.updateNoteContent",
         client_method: "update_note",
+        document: "mutation UpdateNoteContent($input: UpdateNoteContentInput!) {
+  updateNoteContent(input: $input) {
+    note {
+      id
+      title
+      content
+    }
+  }
+}",
     },
 ];
 
