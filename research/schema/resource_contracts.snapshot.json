@@ -256,10 +256,10 @@
   "schema_contract_version": 1,
   "source": {
     "captured_at": "2026-02-23T09:06:10Z",
-    "endpoint": "https://spikestudio.kibe.la/api/v1",
+    "endpoint": "https://example-team.kibe.la/api/v1",
     "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
     "mode": "endpoint_introspection_snapshot",
-    "origin": "https://spikestudio.kibe.la",
+    "origin": "https://example-team.kibe.la",
     "upstream_commit": ""
   }
 }

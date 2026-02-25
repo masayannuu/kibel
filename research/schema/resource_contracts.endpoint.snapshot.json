@@ -1,8 +1,8 @@
 {
   "schema_contract_version": 1,
   "captured_at": "2026-02-23T09:06:10Z",
-  "origin": "https://spikestudio.kibe.la",
-  "endpoint": "https://spikestudio.kibe.la/api/v1",
+  "origin": "https://example-team.kibe.la",
+  "endpoint": "https://example-team.kibe.la/api/v1",
   "resource_count": 17,
   "resources": [
     {

@@ -1763,8 +1763,8 @@ mod tests {
     #[test]
     fn infer_team_from_kibela_origin() {
         assert_eq!(
-            infer_team_from_origin("https://spikestudio.kibe.la/"),
-            Some("spikestudio".to_string())
+            infer_team_from_origin("https://example-team.kibe.la/"),
+            Some("example-team".to_string())
         );
         assert_eq!(infer_team_from_origin("https://example.com"), None);
     }
@@ -1772,21 +1772,21 @@ mod tests {
     #[test]
     fn normalize_origin_requires_scheme_and_removes_trailing_slash() {
         assert_eq!(
-            normalize_origin_owned("https://SPIKESTUDIO.kibe.la/"),
-            Some("https://spikestudio.kibe.la".to_string())
+            normalize_origin_owned("https://EXAMPLE-TEAM.kibe.la/"),
+            Some("https://example-team.kibe.la".to_string())
         );
-        assert_eq!(normalize_origin_owned("spikestudio.kibe.la"), None);
+        assert_eq!(normalize_origin_owned("example-team.kibe.la"), None);
     }
 
     #[test]
     fn token_store_lookup_subjects_include_origin_specific_and_legacy_team() {
         let subjects =
-            token_store_lookup_subjects("spikestudio", Some("https://spikestudio.kibe.la"));
+            token_store_lookup_subjects("example-team", Some("https://example-team.kibe.la"));
         assert_eq!(
             subjects,
             vec![
-                "origin::https://spikestudio.kibe.la::team::spikestudio".to_string(),
-                "spikestudio".to_string(),
+                "origin::https://example-team.kibe.la::team::example-team".to_string(),
+                "example-team".to_string(),
             ]
         );
     }
@@ -1794,12 +1794,12 @@ mod tests {
     #[test]
     fn token_settings_url_uses_tenant_origin() {
         assert_eq!(
-            kibela_access_token_settings_url("https://spikestudio.kibe.la"),
-            "https://spikestudio.kibe.la/settings/access_tokens".to_string()
+            kibela_access_token_settings_url("https://example-team.kibe.la"),
+            "https://example-team.kibe.la/settings/access_tokens".to_string()
         );
         assert_eq!(
-            kibela_access_token_settings_url("https://spikestudio.kibe.la/"),
-            "https://spikestudio.kibe.la/settings/access_tokens".to_string()
+            kibela_access_token_settings_url("https://example-team.kibe.la/"),
+            "https://example-team.kibe.la/settings/access_tokens".to_string()
         );
     }
 }
