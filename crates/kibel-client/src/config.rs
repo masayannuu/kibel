@@ -15,6 +15,8 @@ pub struct Config {
     pub default_team: Option<String>,
     #[serde(default)]
     pub profiles: BTreeMap<String, Profile>,
+    #[serde(default)]
+    pub search_note_presets: BTreeMap<String, SearchNotePreset>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,6 +25,34 @@ pub struct Profile {
     pub token: Option<String>,
     #[serde(default)]
     pub origin: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchNotePreset {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub resources: Vec<String>,
+    #[serde(default)]
+    pub coediting: Option<bool>,
+    #[serde(default)]
+    pub updated: Option<String>,
+    #[serde(default)]
+    pub group_ids: Vec<String>,
+    #[serde(default)]
+    pub user_ids: Vec<String>,
+    #[serde(default)]
+    pub folder_ids: Vec<String>,
+    #[serde(default)]
+    pub liker_ids: Vec<String>,
+    #[serde(default)]
+    pub is_archived: Option<bool>,
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    #[serde(default)]
+    pub first: Option<u32>,
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 /// Returns the default config file path.
@@ -136,6 +166,21 @@ impl Config {
         true
     }
 
+    #[must_use]
+    pub fn search_note_preset(&self, name: &str) -> Option<&SearchNotePreset> {
+        self.search_note_presets.get(name)
+    }
+
+    pub fn set_search_note_preset(&mut self, name: &str, preset: SearchNotePreset) -> bool {
+        let normalized = name.trim();
+        if normalized.is_empty() {
+            return false;
+        }
+        self.search_note_presets
+            .insert(normalized.to_string(), preset);
+        true
+    }
+
     /// Resolves effective team from request/default config.
     ///
     /// # Examples
@@ -197,7 +242,7 @@ fn normalize_non_empty(value: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, SearchNotePreset};
 
     #[test]
     fn resolve_origin_prefers_requested_value() {
@@ -238,5 +283,24 @@ mod tests {
         let mut config = Config::default();
         assert!(!config.set_default_team("   "));
         assert!(config.default_team.is_none());
+    }
+
+    #[test]
+    fn search_note_preset_round_trip() {
+        let mut config = Config::default();
+        assert!(!config.set_search_note_preset("   ", SearchNotePreset::default()));
+        assert!(config.search_note_preset("daily").is_none());
+
+        let preset = SearchNotePreset {
+            query: "onboarding".to_string(),
+            first: Some(10),
+            ..SearchNotePreset::default()
+        };
+        assert!(config.set_search_note_preset("daily", preset));
+        let loaded = config
+            .search_note_preset("daily")
+            .expect("preset should be set");
+        assert_eq!(loaded.query, "onboarding");
+        assert_eq!(loaded.first, Some(10));
     }
 }

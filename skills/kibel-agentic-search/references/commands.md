@@ -28,6 +28,18 @@ Broad recall:
 kibel --json search note --query "<query>" --first 16
 ```
 
+Cursor next page:
+
+```bash
+kibel --json search note --query "<query>" --after "<cursor>" --first 16
+```
+
+User discovery:
+
+```bash
+kibel --json search user --query "<query>" --first 10
+```
+
 Precision narrowing:
 
 ```bash
@@ -45,5 +57,6 @@ kibel --json search note \
 
 ```bash
 kibel --json note get --id "<NOTE_ID>"
+kibel --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 kibel --json note get-from-path --path "/notes/<number>"
 ```

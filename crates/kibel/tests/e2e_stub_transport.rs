@@ -213,6 +213,91 @@ fn note_get_success_with_stub_fixture() {
 }
 
 #[test]
+fn note_get_many_success_with_stub_fixture() {
+    let (output, payload) = run_kibel_json(
+        &["note", "get-many", "--id", "N1", "--id", "N2"],
+        &base_env(
+            "http://fixture.local",
+            fixture_note("N1", "stub-title", "stub-content"),
+        ),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["notes"][0]["id"],
+        Value::String("N1".to_string())
+    );
+}
+
+#[test]
+fn search_note_preset_save_and_load() {
+    let config_path = isolated_config_path();
+    let capture_path = isolated_capture_path();
+    let response = json!({
+        "data": {
+            "search": {
+                "pageInfo": {
+                    "hasNextPage": false,
+                    "hasPreviousPage": false,
+                    "startCursor": Value::Null,
+                    "endCursor": Value::Null
+                },
+                "edges": []
+            }
+        }
+    });
+    let mut envs = base_env("http://fixture.local", response.to_string());
+    envs.push(("KIBEL_TEST_CAPTURE_REQUEST_PATH", capture_path.clone()));
+
+    let (save_output, save_payload) = run_kibel_json(
+        &[
+            "--config-path",
+            &config_path,
+            "search",
+            "note",
+            "--query",
+            "onboarding",
+            "--save-preset",
+            "daily",
+        ],
+        &envs,
+    );
+    assert_eq!(save_output.status.code(), Some(0));
+    assert_eq!(save_payload["ok"], Value::Bool(true));
+    assert_eq!(
+        save_payload["data"]["preset_saved"],
+        Value::String("daily".to_string())
+    );
+
+    let (load_output, load_payload) = run_kibel_json(
+        &[
+            "--config-path",
+            &config_path,
+            "search",
+            "note",
+            "--preset",
+            "daily",
+        ],
+        &envs,
+    );
+    assert_eq!(load_output.status.code(), Some(0));
+    assert_eq!(load_payload["ok"], Value::Bool(true));
+    assert_eq!(
+        load_payload["data"]["preset"],
+        Value::String("daily".to_string())
+    );
+
+    let captured_raw = std::fs::read_to_string(&capture_path).expect("capture file should exist");
+    let captured =
+        serde_json::from_str::<Value>(&captured_raw).expect("captured request must be JSON");
+    assert_eq!(
+        captured["variables"]["query"],
+        Value::String("onboarding".to_string())
+    );
+}
+
+#[test]
 fn note_get_not_found_maps_to_not_found_error() {
     let (output, payload) = run_kibel_json(
         &["note", "get", "--id", "N404"],

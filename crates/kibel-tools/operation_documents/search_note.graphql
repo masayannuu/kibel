@@ -10,6 +10,7 @@ query SearchNote(
   $isArchived: Boolean
   $sortBy: SearchSortKind
   $first: Int!
+  $after: String
 ) {
   search(
     query: $query
@@ -23,7 +24,14 @@ query SearchNote(
     isArchived: $isArchived
     sortBy: $sortBy
     first: $first
+    after: $after
   ) {
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
     edges {
       node {
         document {
@@ -36,6 +44,7 @@ query SearchNote(
         contentSummaryHtml
         path
         author {
+          id
           account
           realName
         }

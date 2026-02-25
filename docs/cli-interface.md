@@ -34,6 +34,7 @@ Query/read:
 
 - `search note`
 - `search folder`
+- `search user`
 - `group list`
 - `folder list`
 - `folder get`
@@ -41,6 +42,7 @@ Query/read:
 - `folder notes`
 - `feed sections`
 - `note get`
+- `note get-many`
 - `note get-from-path`
 - `auth status`
 - `config profiles`
@@ -67,14 +69,23 @@ Ad-hoc lane:
 
 - `--query` is optional.
 - If `--resource` is omitted, default resource is `NOTE`.
+- `--after` can be used for forward cursor pagination.
 - `--resource` supports:
   - `NOTE`
   - `COMMENT`
   - `ATTACHMENT`
 - `--user-id` is repeatable and maps to GraphQL `userIds`.
+- `--preset <name>` loads saved search defaults from config.
+- `--save-preset <name>` stores the effective search filters to config.
 - `--mine` is a dedicated mode for latest notes by current user.
   - `--mine` cannot be combined with other search filters.
   - returns the current user's latest notes ordered by recency.
+
+### `search user`
+
+- `search note` 結果の `author` を集約して user discovery を行う補助コマンド。
+- `id`, `account`, `real_name`, `match_count` を返す。
+- `--group-id` / `--folder-id` で探索範囲を絞り込める。
 
 ### `search folder`
 
@@ -145,6 +156,7 @@ Token resolution order is fixed:
 - preferred: OS credential store (tenant-origin subject)
 - also persisted to config profile for server/non-keychain environments
 - keychain backend failure does not block config persistence
+- `search note --save-preset` stores preset filters in config (`search_note_presets`).
 
 Origin/team resolution:
 

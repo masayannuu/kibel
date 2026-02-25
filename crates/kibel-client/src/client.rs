@@ -153,6 +153,7 @@ pub struct SearchNoteInput {
     pub is_archived: Option<bool>,
     pub sort_by: Option<String>,
     pub first: Option<u32>,
+    pub after: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -495,6 +496,22 @@ impl KibelClient {
     /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
     /// or transport/API errors from GraphQL.
     pub fn search_note(&self, input: &SearchNoteInput) -> Result<Value, KibelClientError> {
+        let payload = self.search_note_with_page_info(input)?;
+        Ok(payload
+            .get("results")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())))
+    }
+
+    /// Searches notes and returns both result items and connection page info.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn search_note_with_page_info(
+        &self,
+        input: &SearchNoteInput,
+    ) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
         let variables = build_search_note_variables(input, first)?;
 
@@ -514,12 +531,20 @@ impl KibelClient {
                 "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
                 "path": node.get("path").cloned().unwrap_or(Value::Null),
                 "author": {
+                    "id": node.pointer("/author/id").cloned().unwrap_or(Value::Null),
                     "account": node.pointer("/author/account").cloned().unwrap_or(Value::Null),
                     "realName": node.pointer("/author/realName").cloned().unwrap_or(Value::Null),
                 }
             }));
         }
-        Ok(Value::Array(items))
+        let page_info = payload
+            .pointer("/data/search/pageInfo")
+            .cloned()
+            .unwrap_or(Value::Null);
+        Ok(json!({
+            "results": items,
+            "pageInfo": page_info,
+        }))
     }
 
     /// Returns latest notes for the current authenticated user.
@@ -1620,6 +1645,9 @@ fn build_search_note_variables(
     if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
         variables.insert("sortBy".to_string(), Value::String(value));
     }
+    if let Some(value) = input.after.as_deref().and_then(normalize_optional) {
+        variables.insert("after".to_string(), Value::String(value));
+    }
     Ok(variables)
 }
 
@@ -2286,6 +2314,7 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )
@@ -2309,12 +2338,36 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )
         .expect("variables should build");
         assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
         assert_eq!(variables.get("userIds"), Some(&json!(["U1", "U2"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_includes_after_cursor() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec![],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+                after: Some(" cursor-1 ".to_string()),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("after"), Some(&json!("cursor-1")));
     }
 
     #[test]
@@ -2332,6 +2385,7 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )

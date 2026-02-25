@@ -104,12 +104,18 @@ export KIBELA_ACCESS_TOKEN="<your-token>"
 ```bash
 kibel --json auth status
 kibel --json search note --query onboarding --first 16
+kibel --json search note --query onboarding --after <cursor> --first 16
+kibel --json search user --query onboarding --first 10
+kibel --json search note --query onboarding --save-preset onboarding
+kibel --json search note --preset onboarding
 kibel --json search note --mine --first 10
 kibel --json note get --id N1
+kibel --json note get-many --id N1 --id N2
 kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
 `search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
+`search note --preset` / `--save-preset` で検索条件をローカル config に保存・再利用できます。
 
 `graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
 
@@ -220,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         is_archived: None,
         sort_by: None,
         first: Some(16),
+        after: None,
     })?;
     println!("results: {}", results);
     Ok(())

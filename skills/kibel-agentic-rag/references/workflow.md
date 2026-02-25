@@ -14,6 +14,12 @@ Run broad search 2-3 times with different query terms:
 kibel --json search note --query "<topic>" --first 16
 ```
 
+If results are many, paginate forward:
+
+```bash
+kibel --json search note --query "<topic>" --after "<cursor>" --first 16
+```
+
 Optional personal context:
 
 ```bash
@@ -34,6 +40,11 @@ kibel --json search note \
 ```
 
 If `<USER_ID>` is unknown, omit it and keep narrowing with group/folder filters.
+Or discover candidates first:
+
+```bash
+kibel --json search user --query "<topic>" --first 10
+```
 
 ## 3. Verification
 
@@ -41,6 +52,7 @@ Get full source before final answer:
 
 ```bash
 kibel --json note get --id "<NOTE_ID>"
+kibel --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 ```
 
 or

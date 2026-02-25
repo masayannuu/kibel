@@ -52,6 +52,7 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
   $isArchived: Boolean
   $sortBy: SearchSortKind
   $first: Int!
+  $after: String
 ) {
   search(
     query: $query
@@ -65,7 +66,14 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
     isArchived: $isArchived
     sortBy: $sortBy
     first: $first
+    after: $after
   ) {
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
     edges {
       node {
         document {
@@ -78,6 +86,7 @@ pub const RESOURCE_CONTRACTS: &[ResourceContract] = &[
         contentSummaryHtml
         path
         author {
+          id
           account
           realName
         }
