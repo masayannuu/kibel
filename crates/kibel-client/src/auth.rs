@@ -75,7 +75,7 @@ pub fn require_team(
 ///
 /// Subject format:
 /// - with origin: `origin::<normalized-origin>::team::<team>`
-/// - legacy fallback: `<team>`
+/// - without origin: `<team>`
 ///
 /// # Examples
 /// ```
@@ -203,29 +203,19 @@ fn read_keychain_token(
     team: &str,
     origin: Option<&str>,
 ) -> Result<Option<String>, KibelClientError> {
-    for subject in token_store_lookup_subjects(team, origin) {
-        // Keychain backend may be unavailable in server environments.
-        // Fallback to next candidate and eventually config instead of hard-failing.
-        let candidate = match store.get_token(&subject) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
+    let subject = token_store_subject(team, origin);
+    // Keychain backend may be unavailable in server environments.
+    // Fallback to config instead of hard-failing.
+    let candidate = match store.get_token(&subject) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
 
-        if let Some(token) = candidate.as_deref().and_then(normalize_owned) {
-            return Ok(Some(token));
-        }
+    if let Some(token) = candidate.as_deref().and_then(normalize_owned) {
+        return Ok(Some(token));
     }
 
     Ok(None)
-}
-
-fn token_store_lookup_subjects(team: &str, origin: Option<&str>) -> Vec<String> {
-    let mut subjects = Vec::new();
-    if let Some(normalized_origin) = normalize_origin(origin) {
-        subjects.push(token_store_subject(team, Some(&normalized_origin)));
-    }
-    subjects.push(team.to_string());
-    subjects
 }
 
 fn normalize_optional(value: Option<&str>) -> Option<String> {
@@ -394,31 +384,6 @@ mod tests {
 
         assert_eq!(result.source, TokenSource::Config);
         assert_eq!(result.token, "config-token");
-    }
-
-    #[test]
-    fn resolve_keychain_falls_back_to_legacy_team_subject() {
-        let config = seed_config();
-        let store = InMemoryTokenStore::default();
-        store
-            .insert_token("acme", "legacy-keychain-token")
-            .expect("seed token should succeed");
-
-        let result = resolve_access_token(
-            &ResolveTokenInput {
-                requested_team: Some("acme".to_string()),
-                requested_origin: Some("https://acme.kibe.la".to_string()),
-                stdin_token: None,
-                env_token: None,
-            },
-            &config,
-            &store,
-        )
-        .expect("resolve should succeed")
-        .expect("token should exist");
-
-        assert_eq!(result.source, TokenSource::Keychain);
-        assert_eq!(result.token, "legacy-keychain-token");
     }
 
     #[test]

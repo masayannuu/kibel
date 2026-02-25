@@ -43,7 +43,7 @@ jobs:
         run: cargo run -p kibel-tools -- create-note-contract check
 
       - name: Verify all-resource contract snapshot/codegen
-        run: cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict
+        run: cargo run -p kibel-tools -- resource-contract check
 
       - name: Build kibel binary
         run: cargo build -p kibel

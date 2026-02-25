@@ -46,4 +46,4 @@
   - trusted query は persisted-hash GET を試行し、未対応時は安全に POST fallback する。
   - mutation と untrusted lane は POST を維持する。
 - createNote runtime introspection は default OFF（`KIBEL_ENABLE_RUNTIME_INTROSPECTION=1` のときのみ有効化）。
-- 仕様差異がある場合は runtime introspection か fallback contract で吸収する（現在 createNote）。
+- 仕様差異がある場合は endpoint snapshot refresh と codegen 更新を優先し、互換レイヤーは持たない。

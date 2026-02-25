@@ -210,7 +210,6 @@ fn build_endpoint_snapshot_from_introspection_extracts_required_args() {
         "https://example.kibe.la",
         "https://example.kibe.la/api/v1",
         "2026-02-24T00:00:00Z",
-        DocumentFallbackMode::Breakglass,
     )
     .expect("snapshot must build");
     let resources = snapshot
@@ -285,30 +284,11 @@ fn parse_endpoint_snapshot_strict_rejects_missing_document() {
         "resources": resources,
     });
 
-    let error = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Strict)
-        .expect_err("strict mode should reject missing document");
+    let error = parse_endpoint_snapshot(&payload).expect_err("missing document should fail");
     assert!(
-        error.to_string().contains("strict mode"),
+        error.to_string().contains("missing `document`"),
         "unexpected error: {error}"
     );
-}
-
-#[test]
-fn parse_endpoint_snapshot_breakglass_accepts_missing_document() {
-    let resources = resource_definitions()
-        .iter()
-        .map(|definition| endpoint_resource_json(definition, false))
-        .collect::<Vec<_>>();
-    let payload = json!({
-        "captured_at": "2026-02-25T00:00:00Z",
-        "origin": "https://example.kibe.la",
-        "endpoint": "https://example.kibe.la/api/v1",
-        "resources": resources,
-    });
-
-    let snapshot = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Breakglass)
-        .expect("breakglass mode should allow fallback templates");
-    assert_eq!(snapshot.resources.len(), resource_definitions().len());
 }
 
 #[test]

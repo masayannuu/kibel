@@ -1,7 +1,0 @@
-mutation CreateFolder($input: CreateFolderInput!) {
-  createFolder(input: $input) {
-    folder {
-      id
-    }
-  }
-}
