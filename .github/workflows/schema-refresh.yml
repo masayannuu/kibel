@@ -52,11 +52,12 @@ jobs:
           cargo run -p kibel-tools -- create-note-contract write
           cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
 
-      - name: Diff resource contract compatibility (warn-only)
+      - name: Diff resource contract compatibility (blocking)
         run: |
           cargo run -p kibel-tools -- resource-contract diff \
             --base /tmp/resource_contracts.snapshot.base.json \
-            --target research/schema/resource_contracts.snapshot.json
+            --target research/schema/resource_contracts.snapshot.json \
+            --fail-on-breaking
 
       - name: Verify refreshed contracts
         run: |

@@ -28,7 +28,7 @@
 - Flow:
   - live introspection refresh (endpoint)
   - create-note snapshot refresh (from endpoint snapshot)
-  - compatibility diff (warn-only)
+  - compatibility diff (blocking)
   - contract write/check
   - quality checks
   - diff があれば PR 自動作成

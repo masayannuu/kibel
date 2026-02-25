@@ -101,25 +101,6 @@ fragment TypeRef on __Type {
   }
 }
 "#;
-const CREATE_NOTE_SCHEMA_QUERY: &str = r#"
-query CreateNoteSchema {
-  createNoteInput: __type(name: "CreateNoteInput") {
-    inputFields {
-      name
-    }
-  }
-  createNotePayload: __type(name: "CreateNotePayload") {
-    fields {
-      name
-    }
-  }
-  noteType: __type(name: "Note") {
-    fields {
-      name
-    }
-  }
-}
-"#;
 const GRAPHQL_ACCEPT_HEADER: &str = "application/graphql-response+json, application/json;q=0.9";
 const REQUIRED_CREATE_NOTE_INPUT_FIELDS: &[&str] = &["title", "content", "groupIds", "coediting"];
 const REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS: &[&str] = &["note"];
@@ -261,7 +242,6 @@ enum TopCommand {
 enum CreateNoteContractAction {
     Check(CreateNoteContractArgs),
     Write(CreateNoteContractArgs),
-    RefreshSnapshot(CreateNoteRefreshArgs),
     RefreshFromEndpoint(CreateNoteRefreshFromEndpointArgs),
 }
 
@@ -297,23 +277,6 @@ struct CreateNoteContractArgs {
         default_value = "crates/kibel-client/src/generated_create_note_contract.rs"
     )]
     generated: String,
-}
-
-#[derive(Args, Clone)]
-struct CreateNoteRefreshArgs {
-    #[arg(long, env = "KIBELA_ORIGIN")]
-    origin: String,
-    #[arg(long, env = "KIBELA_ACCESS_TOKEN")]
-    token: String,
-    #[arg(
-        long,
-        default_value = "research/schema/create_note_contract.snapshot.json"
-    )]
-    snapshot: String,
-    #[arg(long)]
-    endpoint: Option<String>,
-    #[arg(long, default_value_t = 30)]
-    timeout_secs: u64,
 }
 
 #[derive(Args, Clone)]
@@ -460,9 +423,6 @@ fn run(cli: Cli) -> Result<(), String> {
         TopCommand::CreateNoteContract { action } => match action {
             CreateNoteContractAction::Check(args) => run_create_note_contract_check(&root, &args),
             CreateNoteContractAction::Write(args) => run_create_note_contract_write(&root, &args),
-            CreateNoteContractAction::RefreshSnapshot(args) => {
-                run_create_note_contract_refresh_snapshot(&root, &args)
-            }
             CreateNoteContractAction::RefreshFromEndpoint(args) => {
                 run_create_note_contract_refresh_from_endpoint(&root, &args)
             }
@@ -1375,34 +1335,6 @@ fn run_create_note_contract_write(
     Ok(())
 }
 
-fn run_create_note_contract_refresh_snapshot(
-    root: &Path,
-    args: &CreateNoteRefreshArgs,
-) -> Result<(), String> {
-    let endpoint = args
-        .endpoint
-        .clone()
-        .unwrap_or_else(|| endpoint_from_origin(&args.origin));
-    let captured_at = now_rfc3339()?;
-    let payload = fetch_graphql_payload(
-        &endpoint,
-        &args.token,
-        CREATE_NOTE_SCHEMA_QUERY,
-        args.timeout_secs,
-    )?;
-    let snapshot_value = build_create_note_snapshot_from_introspection(
-        &payload,
-        &args.origin,
-        &endpoint,
-        &captured_at,
-    )?;
-
-    let snapshot_path = resolve_path(root, &args.snapshot);
-    write_json_pretty(&snapshot_path, &snapshot_value)?;
-    println!("create-note contract snapshot refresh: ok (written)");
-    Ok(())
-}
-
 fn run_create_note_contract_refresh_from_endpoint(
     root: &Path,
     args: &CreateNoteRefreshFromEndpointArgs,
@@ -1416,47 +1348,6 @@ fn run_create_note_contract_refresh_from_endpoint(
     write_json_pretty(&snapshot_path, &snapshot_value)?;
     println!("create-note contract refresh from endpoint snapshot: ok (written)");
     Ok(())
-}
-
-fn build_create_note_snapshot_from_introspection(
-    payload: &Value,
-    origin: &str,
-    endpoint: &str,
-    captured_at: &str,
-) -> Result<Value, String> {
-    let input_fields = collect_graphql_name_list(
-        payload
-            .pointer("/data/createNoteInput/inputFields")
-            .ok_or_else(|| "missing /data/createNoteInput/inputFields".to_string())?,
-        "createNoteInput.inputFields",
-    )?;
-    let payload_fields = collect_graphql_name_list(
-        payload
-            .pointer("/data/createNotePayload/fields")
-            .ok_or_else(|| "missing /data/createNotePayload/fields".to_string())?,
-        "createNotePayload.fields",
-    )?;
-    let note_projection_fields = collect_graphql_name_list(
-        payload
-            .pointer("/data/noteType/fields")
-            .ok_or_else(|| "missing /data/noteType/fields".to_string())?,
-        "noteType.fields",
-    )?;
-
-    validate_create_note_schema_fields(
-        &input_fields,
-        &payload_fields,
-        &note_projection_fields,
-        "introspection payload",
-    )?;
-    Ok(create_note_snapshot_value(
-        &input_fields,
-        &payload_fields,
-        &note_projection_fields,
-        origin,
-        &format!("live-introspection:{endpoint}"),
-        captured_at,
-    ))
 }
 
 fn build_create_note_schema_from_endpoint_introspection(
@@ -2819,92 +2710,6 @@ mod tests {
         let snapshot = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Breakglass)
             .expect("breakglass mode should allow fallback templates");
         assert_eq!(snapshot.resources.len(), resource_definitions().len());
-    }
-
-    #[test]
-    fn build_create_note_snapshot_from_introspection_extracts_fields() {
-        let payload = json!({
-            "data": {
-                "createNoteInput": {
-                    "inputFields": [
-                        { "name": "title" },
-                        { "name": "content" },
-                        { "name": "groupIds" },
-                        { "name": "coediting" },
-                        { "name": "draft" }
-                    ]
-                },
-                "createNotePayload": {
-                    "fields": [
-                        { "name": "note" },
-                        { "name": "clientMutationId" }
-                    ]
-                },
-                "noteType": {
-                    "fields": [
-                        { "name": "id" },
-                        { "name": "title" }
-                    ]
-                }
-            }
-        });
-
-        let snapshot = build_create_note_snapshot_from_introspection(
-            &payload,
-            "https://example.kibe.la",
-            "https://example.kibe.la/api/v1",
-            "2026-02-24T00:00:00Z",
-        )
-        .expect("create note snapshot should build");
-
-        assert_eq!(
-            snapshot
-                .pointer("/create_note_input_fields/0")
-                .and_then(Value::as_str),
-            Some("title")
-        );
-        assert_eq!(
-            snapshot
-                .pointer("/required_payload_fields/0")
-                .and_then(Value::as_str),
-            Some("note")
-        );
-    }
-
-    #[test]
-    fn build_create_note_snapshot_from_introspection_rejects_missing_required_fields() {
-        let payload = json!({
-            "data": {
-                "createNoteInput": {
-                    "inputFields": [
-                        { "name": "title" },
-                        { "name": "content" }
-                    ]
-                },
-                "createNotePayload": {
-                    "fields": [
-                        { "name": "note" }
-                    ]
-                },
-                "noteType": {
-                    "fields": [
-                        { "name": "id" }
-                    ]
-                }
-            }
-        });
-
-        let error = build_create_note_snapshot_from_introspection(
-            &payload,
-            "https://example.kibe.la",
-            "https://example.kibe.la/api/v1",
-            "2026-02-24T00:00:00Z",
-        )
-        .expect_err("missing required fields should fail");
-        assert!(
-            error.contains("missing required create-note input fields"),
-            "unexpected error: {error}"
-        );
     }
 
     #[test]

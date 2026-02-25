@@ -27,7 +27,7 @@
   - live endpoint から endpoint introspection refresh
   - endpoint snapshot から `create-note` snapshot refresh
   - contract codegen/write
-  - resource contract compatibility diff (warn-only)
+  - resource contract compatibility diff (blocking)
   - contract checks + workspace checks
   - 差分があれば PR 作成
 
@@ -45,10 +45,11 @@ cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint
 # refresh contract snapshot/module from committed endpoint snapshot
 cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
 
-# compatibility diff (warn-only by default)
+# compatibility diff (blocking in CI)
 cargo run -p kibel-tools -- resource-contract diff \
   --base /tmp/base-resource-contracts.snapshot.json \
-  --target research/schema/resource_contracts.snapshot.json
+  --target research/schema/resource_contracts.snapshot.json \
+  --fail-on-breaking
 
 # deterministic checks
 cargo run -p kibel-tools -- create-note-contract check

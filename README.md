@@ -242,7 +242,7 @@ All-resource contract:
 - refresh endpoint snapshot (strict): `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
 - check (strict): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
 - update generated module (strict): `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
-- compatibility diff (warn-only): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target research/schema/resource_contracts.snapshot.json`
+- compatibility diff (blocking): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target research/schema/resource_contracts.snapshot.json --fail-on-breaking`
 - breakglass (temporary only): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass`
 
 ## Development Quality Gates
