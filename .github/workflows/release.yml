@@ -183,9 +183,11 @@ jobs:
           HOMEBREW_TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          if [ -n "${HOMEBREW_TAP_REPO}" ] && [ -n "${HOMEBREW_TAP_TOKEN}" ]; then
+          TAP_REPO="$(printf '%s' "${HOMEBREW_TAP_REPO}" | tr -d '[:space:]')"
+          TAP_TOKEN="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
+          if [ -n "${TAP_REPO}" ] && [ -n "${TAP_TOKEN}" ]; then
             echo "enabled=true" >> "${GITHUB_OUTPUT}"
-            echo "repo=${HOMEBREW_TAP_REPO}" >> "${GITHUB_OUTPUT}"
+            echo "repo=${TAP_REPO}" >> "${GITHUB_OUTPUT}"
           else
             echo "enabled=false" >> "${GITHUB_OUTPUT}"
             echo "Homebrew tap sync skipped: HOMEBREW_TAP_REPO/HOMEBREW_TAP_TOKEN is not configured."
@@ -205,26 +207,11 @@ jobs:
 
       - name: Checkout Homebrew tap repository
         if: ${{ steps.tap_config.outputs.enabled == 'true' }}
-        env:
-          HOMEBREW_TAP_REPO: ${{ steps.tap_config.outputs.repo }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          set -euo pipefail
-          remote_url="https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git"
-          selected_branch=""
-          for candidate in main master; do
-            if git ls-remote --exit-code --heads "${remote_url}" "${candidate}" >/dev/null 2>&1; then
-              selected_branch="${candidate}"
-              break
-            fi
-          done
-
-          if [ -z "${selected_branch}" ]; then
-            echo "failed to resolve tap branch (tried: main, master) for ${HOMEBREW_TAP_REPO}" >&2
-            exit 1
-          fi
-
-          git clone --depth 1 --branch "${selected_branch}" "${remote_url}" tap
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          repository: ${{ steps.tap_config.outputs.repo }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
 
       - name: Render Homebrew formula
         if: ${{ steps.tap_config.outputs.enabled == 'true' }}
