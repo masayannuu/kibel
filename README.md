@@ -238,8 +238,9 @@ All-resource contract:
 
 - endpoint snapshot source: `research/schema/resource_contracts.endpoint.snapshot.json`
 - normalized snapshot: `research/schema/resource_contracts.snapshot.json`
-- check: `cargo run -p kibel-tools -- resource-contract check`
-- update generated module: `cargo run -p kibel-tools -- resource-contract write`
+- check (strict): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
+- update generated module (strict): `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
+- breakglass (temporary only): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass`
 
 ## Development Quality Gates
 

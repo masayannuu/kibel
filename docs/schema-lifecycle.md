@@ -16,6 +16,7 @@
 2. `createNote` 契約の変化がある場合は `create-note-contract` の snapshot/codegen を同期する。
 3. all-resource 契約の snapshot/codegen を同期する。
    - trusted operation document も同時に更新される（endpoint snapshot起点）。
+   - 通常運用は strict mode（document fallback 無効）で実行する。
 4. unit/E2E を実行する。
 5. CI 通過を確認してマージする。
 
@@ -38,19 +39,27 @@ cargo run -p kibel-tools -- create-note-contract refresh-snapshot \
 
 # refresh endpoint snapshot from live GraphQL
 cargo run -p kibel-tools -- resource-contract refresh-endpoint \
-  --origin "$KIBELA_ORIGIN"
+  --origin "$KIBELA_ORIGIN" \
+  --document-fallback-mode strict
 
 # refresh contract snapshot/module from committed endpoint snapshot
-cargo run -p kibel-tools -- resource-contract write
+cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
 
 # deterministic checks
 cargo run -p kibel-tools -- create-note-contract check
-cargo run -p kibel-tools -- resource-contract check
+cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo test -p kibel-client --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
+
+Breakglass only:
+
+```bash
+# temporary fallback for historical snapshots without `document`
+cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass
 ```
 
 ## Drift policy

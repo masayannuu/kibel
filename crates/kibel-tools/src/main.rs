@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -268,6 +268,18 @@ enum ResourceContractAction {
     RefreshEndpoint(EndpointRefreshArgs),
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum DocumentFallbackMode {
+    Strict,
+    Breakglass,
+}
+
+impl DocumentFallbackMode {
+    fn allow_legacy(self) -> bool {
+        matches!(self, Self::Breakglass)
+    }
+}
+
 #[derive(Args, Clone)]
 struct CreateNoteContractArgs {
     #[arg(
@@ -316,6 +328,8 @@ struct ResourceContractArgs {
         default_value = "crates/kibel-client/src/generated_resource_contracts.rs"
     )]
     generated: String,
+    #[arg(long, value_enum, default_value_t = DocumentFallbackMode::Strict)]
+    document_fallback_mode: DocumentFallbackMode,
 }
 
 #[derive(Args, Clone)]
@@ -333,6 +347,8 @@ struct EndpointRefreshArgs {
     endpoint: Option<String>,
     #[arg(long, default_value_t = 30)]
     timeout_secs: u64,
+    #[arg(long, value_enum, default_value_t = DocumentFallbackMode::Strict)]
+    document_fallback_mode: DocumentFallbackMode,
 }
 
 #[derive(Debug, Clone)]
@@ -1434,6 +1450,7 @@ fn build_endpoint_snapshot_from_introspection(
     origin: &str,
     endpoint: &str,
     captured_at: &str,
+    fallback_mode: DocumentFallbackMode,
 ) -> Result<Value, String> {
     let query_fields = parse_graphql_fields(payload, "query")?;
     let mutation_fields = parse_graphql_fields(payload, "mutation")?;
@@ -1462,9 +1479,25 @@ fn build_endpoint_snapshot_from_introspection(
                 required_variables.push(arg.name.clone());
             }
         }
-        let document = build_operation_document(definition, field_spec, &type_map)
-            .or_else(|| legacy_operation_document(definition.name).map(str::to_string))
-            .ok_or_else(|| format!("failed to build operation document: {}", definition.name))?;
+        let document = if let Some(generated_document) =
+            build_operation_document(definition, field_spec, &type_map)
+        {
+            generated_document
+        } else if fallback_mode.allow_legacy() {
+            legacy_operation_document(definition.name)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    format!(
+                        "failed to build operation document for `{}`; no breakglass template found",
+                        definition.name
+                    )
+                })?
+        } else {
+            return Err(format!(
+                "failed to build operation document for `{}` in strict mode",
+                definition.name
+            ));
+        };
 
         resources.push(json!({
             "name": definition.name,
@@ -1489,8 +1522,18 @@ fn build_endpoint_snapshot_from_introspection(
 }
 
 #[allow(clippy::too_many_lines)]
-fn load_endpoint_snapshot(path: &Path) -> Result<EndpointSnapshot, String> {
+fn load_endpoint_snapshot(
+    path: &Path,
+    fallback_mode: DocumentFallbackMode,
+) -> Result<EndpointSnapshot, String> {
     let payload = read_json(path)?;
+    parse_endpoint_snapshot(&payload, fallback_mode)
+}
+
+fn parse_endpoint_snapshot(
+    payload: &Value,
+    fallback_mode: DocumentFallbackMode,
+) -> Result<EndpointSnapshot, String> {
     let object = payload
         .as_object()
         .ok_or_else(|| "endpoint snapshot must be an object".to_string())?;
@@ -1549,8 +1592,24 @@ fn load_endpoint_snapshot(path: &Path) -> Result<EndpointSnapshot, String> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
-            .or_else(|| legacy_operation_document(&name).map(str::to_string))
-            .ok_or_else(|| format!("resource `{name}` missing `document`"))?;
+            .or_else(|| {
+                if fallback_mode.allow_legacy() {
+                    legacy_operation_document(&name).map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                if fallback_mode.allow_legacy() {
+                    format!(
+                        "resource `{name}` missing `document` and no breakglass template is available"
+                    )
+                } else {
+                    format!(
+                        "resource `{name}` missing `document` (strict mode). re-run refresh/write or use --document-fallback-mode breakglass temporarily"
+                    )
+                }
+            })?;
 
         let all_set = all_variables.iter().collect::<HashSet<_>>();
         let missing_required = required_variables
@@ -2016,7 +2075,8 @@ fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> Resu
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
 
-    let endpoint_snapshot = load_endpoint_snapshot(&endpoint_snapshot_path)?;
+    let endpoint_snapshot =
+        load_endpoint_snapshot(&endpoint_snapshot_path, args.document_fallback_mode)?;
     let expected_snapshot_value =
         build_resource_snapshot_value(root, &endpoint_snapshot_path, &endpoint_snapshot)?;
     let expected_snapshot = normalize_resource_snapshot(&expected_snapshot_value)?;
@@ -2048,7 +2108,8 @@ fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> Resu
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
 
-    let endpoint_snapshot = load_endpoint_snapshot(&endpoint_snapshot_path)?;
+    let endpoint_snapshot =
+        load_endpoint_snapshot(&endpoint_snapshot_path, args.document_fallback_mode)?;
     let snapshot_value =
         build_resource_snapshot_value(root, &endpoint_snapshot_path, &endpoint_snapshot)?;
     write_json_pretty(&snapshot_path, &snapshot_value)?;
@@ -2091,6 +2152,7 @@ fn run_resource_contract_refresh_endpoint(
         origin,
         &endpoint,
         &captured_at,
+        args.document_fallback_mode,
     )?;
 
     let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
@@ -2270,6 +2332,7 @@ mod tests {
             "https://example.kibe.la",
             "https://example.kibe.la/api/v1",
             "2026-02-24T00:00:00Z",
+            DocumentFallbackMode::Strict,
         )
         .expect("snapshot must build");
         let resources = snapshot
@@ -2292,6 +2355,79 @@ mod tests {
                 .is_some_and(|value| value.contains("query SearchNote")),
             "generated snapshot should include document"
         );
+    }
+
+    fn endpoint_resource_json(definition: &ResourceDefinition, with_document: bool) -> Value {
+        let mut object = serde_json::Map::new();
+        object.insert(
+            "name".to_string(),
+            Value::String(definition.name.to_string()),
+        );
+        object.insert(
+            "kind".to_string(),
+            Value::String(definition.kind.to_string()),
+        );
+        object.insert(
+            "field".to_string(),
+            Value::String(definition.field.to_string()),
+        );
+        object.insert(
+            "operation".to_string(),
+            Value::String(to_pascal_case(definition.name)),
+        );
+        object.insert(
+            "client_method".to_string(),
+            Value::String(definition.client_method.to_string()),
+        );
+        object.insert("all_variables".to_string(), Value::Array(Vec::new()));
+        object.insert("required_variables".to_string(), Value::Array(Vec::new()));
+        if with_document {
+            object.insert(
+                "document".to_string(),
+                Value::String(format!(
+                    "query {} {{ {} }}",
+                    to_pascal_case(definition.name),
+                    definition.field
+                )),
+            );
+        }
+        Value::Object(object)
+    }
+
+    #[test]
+    fn parse_endpoint_snapshot_strict_rejects_missing_document() {
+        let resources = resource_definitions()
+            .iter()
+            .map(|definition| endpoint_resource_json(definition, false))
+            .collect::<Vec<_>>();
+        let payload = json!({
+            "captured_at": "2026-02-25T00:00:00Z",
+            "origin": "https://example.kibe.la",
+            "endpoint": "https://example.kibe.la/api/v1",
+            "resources": resources,
+        });
+
+        let error = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Strict)
+            .expect_err("strict mode should reject missing document");
+        assert!(error.contains("strict mode"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn parse_endpoint_snapshot_breakglass_accepts_missing_document() {
+        let resources = resource_definitions()
+            .iter()
+            .map(|definition| endpoint_resource_json(definition, false))
+            .collect::<Vec<_>>();
+        let payload = json!({
+            "captured_at": "2026-02-25T00:00:00Z",
+            "origin": "https://example.kibe.la",
+            "endpoint": "https://example.kibe.la/api/v1",
+            "resources": resources,
+        });
+
+        let snapshot = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Breakglass)
+            .expect("breakglass mode should allow fallback templates");
+        assert_eq!(snapshot.resources.len(), resource_definitions().len());
     }
 
     #[test]

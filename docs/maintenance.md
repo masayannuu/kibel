@@ -4,13 +4,13 @@
 
 1. endpoint introspection snapshot を更新し、ローカル契約へ反映する。
    - `cargo run -p kibel-tools -- create-note-contract refresh-snapshot --origin "$KIBELA_ORIGIN"`
-   - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN"`
+   - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
 2. `kibel-client` に入力構造体・実行メソッドを追加。
 3. `kibel` に CLI サブコマンドを追加。
 4. `--json` の出力形を固定化。
 5. unit test + stub E2E を追加。
 6. all-resource contract snapshot/codegen を同期。
-   - `cargo run -p kibel-tools -- resource-contract write`
+   - `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
 
 ## Regression checklist
 
@@ -41,7 +41,7 @@
    - `cargo test -p kibel-client --doc`
    - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
    - `cargo run -p kibel-tools -- create-note-contract check`
-   - `cargo run -p kibel-tools -- resource-contract check`
+   - `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
 3. package 検証を実行する。
    - `cargo package --locked -p kibel-client`
 4. `README.md` と `docs/` を実装に合わせて更新する。

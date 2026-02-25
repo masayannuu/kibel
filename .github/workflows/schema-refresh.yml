@@ -41,17 +41,17 @@ jobs:
           KIBELA_ACCESS_TOKEN: ${{ secrets.KIBELA_ACCESS_TOKEN }}
         run: |
           cargo run -p kibel-tools -- create-note-contract refresh-snapshot --origin "${KIBELA_ORIGIN}"
-          cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "${KIBELA_ORIGIN}"
+          cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "${KIBELA_ORIGIN}" --document-fallback-mode strict
 
       - name: Regenerate contracts
         run: |
           cargo run -p kibel-tools -- create-note-contract write
-          cargo run -p kibel-tools -- resource-contract write
+          cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
 
       - name: Verify refreshed contracts
         run: |
           cargo run -p kibel-tools -- create-note-contract check
-          cargo run -p kibel-tools -- resource-contract check
+          cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo test --workspace --all-features

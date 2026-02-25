@@ -87,6 +87,51 @@ fn search_note_success() {
 }
 
 #[test]
+fn search_note_mine_success() {
+    let response = json!({
+        "data": {
+            "currentUser": {
+                "latestNotes": {
+                    "edges": [
+                        {
+                            "node": {
+                                "id": "N-mine",
+                                "title": "my note",
+                                "url": "https://example.kibe.la/notes/N-mine",
+                                "updatedAt": "2026-02-25T00:00:00Z",
+                                "contentSummaryHtml": "summary",
+                                "path": "/notes/N-mine",
+                                "author": { "account": "me", "realName": "Me" }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+    let capture_path = isolated_capture_path();
+    let mut envs = base_env(response);
+    envs.push(("KIBEL_TEST_CAPTURE_REQUEST_PATH", capture_path.clone()));
+    let (output, payload) = run_kibel_json(&["search", "note", "--mine"], &envs);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["results"][0]["id"],
+        Value::String("N-mine".to_string())
+    );
+
+    let captured_raw = std::fs::read_to_string(&capture_path).expect("capture file should exist");
+    let captured =
+        serde_json::from_str::<Value>(&captured_raw).expect("captured request must be JSON");
+    assert!(captured["query"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("query GetCurrentUserLatestNotes"));
+    assert_eq!(captured["variables"]["first"], Value::Number(16.into()));
+}
+
+#[test]
 fn search_folder_success() {
     let response = json!({
         "data": {

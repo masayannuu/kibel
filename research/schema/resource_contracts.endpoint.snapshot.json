@@ -16,7 +16,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation AttachNoteToFolder($input: AttachNoteToFolderInput!) {\n  attachNoteToFolder(input: $input) {\n    note {\n      id\n    }\n  }\n}"
     },
     {
       "name": "createComment",
@@ -29,7 +30,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation CreateComment($input: CreateCommentInput!) {\n  createComment(input: $input) {\n    comment {\n      id\n    }\n  }\n}"
     },
     {
       "name": "createCommentReply",
@@ -42,7 +44,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation CreateCommentReply($input: CreateCommentReplyInput!) {\n  createCommentReply(input: $input) {\n    reply {\n      id\n    }\n  }\n}"
     },
     {
       "name": "createFolder",
@@ -55,7 +58,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation CreateFolder($input: CreateFolderInput!) {\n  createFolder(input: $input) {\n    folder {\n      id\n    }\n  }\n}"
     },
     {
       "name": "createNote",
@@ -68,7 +72,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation CreateNote($input: CreateNoteInput!) {\n  createNote(input: $input) {\n    clientMutationId\n    note {\n      id\n      title\n      content\n    }\n  }\n}"
     },
     {
       "name": "getFeedSections",
@@ -84,7 +89,8 @@
       ],
       "required_variables": [
         "first"
-      ]
+      ],
+      "document": "query GetFeedSections($kind: FeedKind!, $groupId: ID!, $first: Int!) {\n  feedSections(kind: $kind, groupId: $groupId, first: $first) {\n    edges {\n      node {\n        ... on FeedNote {\n          date\n          note {\n            id\n            title\n            contentSummaryHtml\n          }\n        }\n        ... on FeedFolderParcel {\n          date\n          folder {\n            id\n            name\n          }\n          notes(first: $first) {\n            edges {\n              node {\n                id\n                title\n                contentSummaryHtml\n              }\n            }\n          }\n        }\n        ... on FeedUserParcel {\n          date\n          user {\n            account\n            realName\n          }\n          notes(first: $first) {\n            edges {\n              node {\n                id\n                title\n                contentSummaryHtml\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "getFolder",
@@ -97,7 +103,8 @@
       ],
       "required_variables": [
         "id"
-      ]
+      ],
+      "document": "query GetFolder($id: ID!, $first: Int!) {\n  folder(id: $id) {\n    name\n    fullName\n    fixedPath\n    createdAt\n    updatedAt\n    group {\n      id\n      name\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n        }\n      }\n    }\n    notes(first: $first) {\n      edges {\n        node {\n          id\n          title\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "getFolderFromPath",
@@ -110,7 +117,8 @@
       ],
       "required_variables": [
         "path"
-      ]
+      ],
+      "document": "query GetFolderFromPath($path: String!, $first: Int!) {\n  folderFromPath(path: $path) {\n    name\n    fullName\n    fixedPath\n    createdAt\n    updatedAt\n    group {\n      id\n      name\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n        }\n      }\n    }\n    notes(first: $first) {\n      edges {\n        node {\n          id\n          title\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "getFolders",
@@ -127,7 +135,8 @@
         "parentFolderIds",
         "active"
       ],
-      "required_variables": []
+      "required_variables": [],
+      "document": "query GetFolders($first: Int!) {\n  folders(first: $first) {\n    edges {\n      node {\n        id\n        name\n      }\n    }\n  }\n}"
     },
     {
       "name": "getGroups",
@@ -142,7 +151,8 @@
         "last",
         "ability"
       ],
-      "required_variables": []
+      "required_variables": [],
+      "document": "query GetGroups($first: Int!) {\n  groups(first: $first) {\n    edges {\n      node {\n        id\n        name\n        isDefault\n        isArchived\n      }\n    }\n  }\n}"
     },
     {
       "name": "getNote",
@@ -155,7 +165,8 @@
       ],
       "required_variables": [
         "id"
-      ]
+      ],
+      "document": "query GetNote($id: ID!) {\n  note(id: $id) {\n    id\n    title\n    content\n  }\n}"
     },
     {
       "name": "getNoteFromPath",
@@ -168,7 +179,8 @@
       ],
       "required_variables": [
         "path"
-      ]
+      ],
+      "document": "query GetNoteFromPath($path: String!, $first: Int!) {\n  noteFromPath(path: $path) {\n    id\n    title\n    content\n    url\n    author {\n      account\n      realName\n    }\n    folders(first: $first) {\n      edges {\n        node {\n          id\n          name\n          fullName\n          fixedPath\n          group {\n            id\n            name\n          }\n        }\n      }\n    }\n    comments(first: $first) {\n      edges {\n        node {\n          id\n          anchor\n          content\n          author {\n            account\n            realName\n          }\n          replies(first: $first) {\n            edges {\n              node {\n                id\n                anchor\n                content\n                author {\n                  account\n                  realName\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n    inlineComments(first: $first) {\n      edges {\n        node {\n          id\n          anchor\n          content\n          author {\n            account\n            realName\n          }\n          replies(first: $first) {\n            edges {\n              node {\n                id\n                anchor\n                content\n                author {\n                  account\n                  realName\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "getNotes",
@@ -185,7 +197,8 @@
         "folderId",
         "active"
       ],
-      "required_variables": []
+      "required_variables": [],
+      "document": "query GetNotes($folderId: ID!, $first: Int!, $last: Int) {\n  notes(folderId: $folderId, first: $first, last: $last) {\n    edges {\n      node {\n        id\n        title\n        url\n      }\n    }\n  }\n}"
     },
     {
       "name": "moveNoteToAnotherFolder",
@@ -198,7 +211,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation MoveNoteToAnotherFolder($input: MoveNoteToAnotherFolderInput!) {\n  moveNoteToAnotherFolder(input: $input) {\n    note {\n      id\n    }\n  }\n}"
     },
     {
       "name": "searchFolder",
@@ -215,7 +229,8 @@
       ],
       "required_variables": [
         "query"
-      ]
+      ],
+      "document": "query SearchFolder($query: String!, $first: Int!) {\n  searchFolder(query: $query, first: $first) {\n    edges {\n      node {\n        name\n        fixedPath\n        group {\n          name\n          isPrivate\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "searchNote",
@@ -241,7 +256,8 @@
       ],
       "required_variables": [
         "query"
-      ]
+      ],
+      "document": "query SearchNote(\n  $query: String!\n  $resources: [SearchResourceKind!]\n  $coediting: Boolean\n  $updated: SearchDate\n  $groupIds: [ID!]\n  $userIds: [ID!]\n  $folderIds: [ID!]\n  $likerIds: [ID!]\n  $isArchived: Boolean\n  $sortBy: SearchSortKind\n  $first: Int!\n) {\n  search(\n    query: $query\n    resources: $resources\n    coediting: $coediting\n    updated: $updated\n    groupIds: $groupIds\n    userIds: $userIds\n    folderIds: $folderIds\n    likerIds: $likerIds\n    isArchived: $isArchived\n    sortBy: $sortBy\n    first: $first\n  ) {\n    edges {\n      node {\n        document {\n          ... on Node {\n            id\n          }\n        }\n        title\n        url\n        contentSummaryHtml\n        path\n        author {\n          account\n          realName\n        }\n      }\n    }\n  }\n}"
     },
     {
       "name": "updateNoteContent",
@@ -254,7 +270,8 @@
       ],
       "required_variables": [
         "input"
-      ]
+      ],
+      "document": "mutation UpdateNoteContent($input: UpdateNoteContentInput!) {\n  updateNoteContent(input: $input) {\n    note {\n      id\n      title\n      content\n    }\n  }\n}"
     }
   ]
 }

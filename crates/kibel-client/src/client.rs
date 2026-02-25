@@ -46,13 +46,7 @@ query CreateNoteSchema {
 }
 "#;
 
-const QUERY_CURRENT_USER_ID: &str = r"
-query GetCurrentUserId {
-  currentUser {
-    id
-  }
-}
-";
+const INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER: &str = "currentUser";
 
 const QUERY_CURRENT_USER_LATEST_NOTES: &str = r"
 query GetCurrentUserLatestNotes($first: Int!) {
@@ -528,21 +522,6 @@ impl KibelClient {
         Ok(Value::Array(items))
     }
 
-    /// Returns the current authenticated user id.
-    ///
-    /// # Errors
-    /// Returns transport/API errors from GraphQL, or [`KibelClientError::Api`]
-    /// when the current user payload is unavailable.
-    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
-        let payload = self.run_untrusted_graphql(
-            QUERY_CURRENT_USER_ID,
-            json!({}),
-            self.timeout_ms,
-            128 * 1024,
-        )?;
-        parse_current_user_id(&payload)
-    }
-
     /// Returns latest notes for the current authenticated user.
     ///
     /// # Errors
@@ -553,11 +532,12 @@ impl KibelClient {
         input: PageInput,
     ) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.run_untrusted_graphql(
+        let payload = self.run_internal_bootstrap_query(
             QUERY_CURRENT_USER_LATEST_NOTES,
             json!({ "first": first }),
             self.timeout_ms,
             2 * 1024 * 1024,
+            INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
         )?;
         let edges = require_array_at(
             &payload,
@@ -581,6 +561,39 @@ impl KibelClient {
             }));
         }
         Ok(Value::Array(items))
+    }
+
+    fn run_internal_bootstrap_query(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: usize,
+        expected_root_field: &str,
+    ) -> Result<Value, KibelClientError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(KibelClientError::InputInvalid(
+                "internal bootstrap query must not be empty".to_string(),
+            ));
+        }
+        if query.to_ascii_lowercase().starts_with("mutation") {
+            return Err(KibelClientError::InputInvalid(
+                "internal bootstrap lane does not allow mutation".to_string(),
+            ));
+        }
+        let root_field = extract_root_field(query).ok_or_else(|| {
+            KibelClientError::InputInvalid(
+                "failed to extract root field for internal bootstrap query".to_string(),
+            )
+        })?;
+        if root_field != expected_root_field {
+            return Err(KibelClientError::InputInvalid(format!(
+                "internal bootstrap query root field mismatch: expected `{expected_root_field}`, got `{root_field}`"
+            )));
+        }
+
+        self.run_untrusted_graphql(query, variables, timeout_ms, max_response_bytes)
     }
 
     /// Searches folders.
@@ -1562,20 +1575,6 @@ fn require_value_at(
     Ok(value)
 }
 
-fn parse_current_user_id(payload: &Value) -> Result<String, KibelClientError> {
-    let user = require_value_at(payload, "/data/currentUser", "current user not found")?;
-    let id = user
-        .get("id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| KibelClientError::Api {
-            code: "NOT_FOUND".to_string(),
-            message: "current user id not found".to_string(),
-        })?;
-    Ok(id.to_string())
-}
-
 fn build_search_note_variables(
     input: &SearchNoteInput,
     first: u32,
@@ -1908,11 +1907,11 @@ mod tests {
     use super::{
         build_search_note_variables, collect_name_set, endpoint_from_origin, extract_graphql_error,
         extract_root_field, is_persisted_query_not_found, is_persisted_query_not_supported,
-        load_schema_fixture_from_env, parse_create_note_at, parse_current_user_id,
-        resource_contract_upstream_commit, resource_contract_version, resource_contracts,
-        should_fallback_apq_status, should_skip_runtime_introspection, trusted_operation_contract,
-        trusted_operation_document, trusted_operations, validate_trusted_operation_request,
-        CreateNoteInput, CreateNoteSchema, KibelClient, SearchNoteInput, TrustedOperation,
+        load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
+        resource_contract_version, resource_contracts, should_fallback_apq_status,
+        should_skip_runtime_introspection, trusted_operation_contract, trusted_operation_document,
+        trusted_operations, validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema,
+        KibelClient, SearchNoteInput, TrustedOperation,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -2349,30 +2348,48 @@ query AliasQuery($id: ID!) {
     }
 
     #[test]
-    fn parse_current_user_id_accepts_valid_payload() {
-        let id = parse_current_user_id(&json!({
-            "data": {
-                "currentUser": {
-                    "id": " U1 "
-                }
+    fn internal_bootstrap_query_rejects_mutation() {
+        let client =
+            KibelClient::new("https://example.kibe.la", "token").expect("client should construct");
+        let error = client
+            .run_internal_bootstrap_query(
+                "mutation Forbidden { currentUser { id } }",
+                json!({}),
+                1_000,
+                1024,
+                super::INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
+            )
+            .expect_err("mutation should be rejected");
+        match error {
+            super::KibelClientError::InputInvalid(message) => {
+                assert!(
+                    message.contains("does not allow mutation"),
+                    "unexpected message: {message}"
+                );
             }
-        }))
-        .expect("current user id should parse");
-        assert_eq!(id, "U1");
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
-    fn parse_current_user_id_rejects_missing_id() {
-        let error = parse_current_user_id(&json!({
-            "data": {
-                "currentUser": {}
-            }
-        }))
-        .expect_err("missing current user id should fail");
+    fn internal_bootstrap_query_rejects_unexpected_root_field() {
+        let client =
+            KibelClient::new("https://example.kibe.la", "token").expect("client should construct");
+        let error = client
+            .run_internal_bootstrap_query(
+                "query WrongRoot($id: ID!) { note(id: $id) { id } }",
+                json!({ "id": "N1" }),
+                1_000,
+                1024,
+                super::INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
+            )
+            .expect_err("unexpected root field should be rejected");
         match error {
-            super::KibelClientError::Api { code, message } => {
-                assert_eq!(code, "NOT_FOUND");
-                assert_eq!(message, "current user id not found");
+            super::KibelClientError::InputInvalid(message) => {
+                assert!(
+                    message.contains("root field mismatch"),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("unexpected error: {other:?}"),
         }

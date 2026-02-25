@@ -172,6 +172,11 @@ Origin/team resolution:
 - no dangerous bypass flag.
 - untrusted lane remains POST-only.
 
+Internal bootstrap lane (not public API):
+
+- `search note --mine` uses an internal read-only `currentUser.latestNotes` query path.
+- internal lane rejects mutation and root-field mismatch before transport execution.
+
 ## Non-goals (not part of official interface)
 
 - internal snapshot file layout details.
