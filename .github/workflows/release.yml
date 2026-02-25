@@ -172,15 +172,30 @@ jobs:
 
   homebrew-tap:
     needs: release
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_REPO != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
+      - name: Resolve Homebrew tap configuration
+        id: tap_config
+        env:
+          HOMEBREW_TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "${HOMEBREW_TAP_REPO}" ] && [ -n "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "repo=${HOMEBREW_TAP_REPO}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Homebrew tap sync skipped: HOMEBREW_TAP_REPO/HOMEBREW_TAP_TOKEN is not configured."
+          fi
+
       - name: Checkout source repository
+        if: ${{ steps.tap_config.outputs.enabled == 'true' }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
       - name: Download packaged artifacts
+        if: ${{ steps.tap_config.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v4
         with:
           pattern: kibel-${{ github.ref_name }}-*
@@ -188,13 +203,15 @@ jobs:
           path: dist
 
       - name: Checkout Homebrew tap repository
+        if: ${{ steps.tap_config.outputs.enabled == 'true' }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
-          repository: ${{ secrets.HOMEBREW_TAP_REPO }}
+          repository: ${{ steps.tap_config.outputs.repo }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
       - name: Render Homebrew formula
+        if: ${{ steps.tap_config.outputs.enabled == 'true' }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           LINUX_X86_64_SHA="$(awk '{print $1}' "dist/kibel-${VERSION}-linux-x86_64.tar.gz.sha256")"
@@ -213,6 +230,7 @@ jobs:
             > tap/Formula/kibel.rb
 
       - name: Commit and push Homebrew formula update
+        if: ${{ steps.tap_config.outputs.enabled == 'true' }}
         run: |
           cd tap
           git config user.name "github-actions[bot]"
