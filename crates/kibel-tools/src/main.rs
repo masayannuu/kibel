@@ -256,7 +256,10 @@ enum ResourceContractAction {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum DocumentFallbackMode {
+    /// Default mode. Do not use legacy `.graphql` templates.
     Strict,
+    /// Emergency mode for historical/partial snapshots.
+    /// Allows manual fallback templates in `operation_documents/*.graphql`.
     Breakglass,
 }
 
@@ -311,7 +314,12 @@ struct ResourceContractArgs {
         default_value = "crates/kibel-client/src/generated_resource_contracts.rs"
     )]
     generated: String,
-    #[arg(long, value_enum, default_value_t = DocumentFallbackMode::Strict)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = DocumentFallbackMode::Strict,
+        help = "Document fallback policy: strict (default, generated-only) or breakglass (allow manual operation_documents/*.graphql)"
+    )]
     document_fallback_mode: DocumentFallbackMode,
 }
 
@@ -348,7 +356,12 @@ struct EndpointRefreshArgs {
     endpoint: Option<String>,
     #[arg(long, default_value_t = 30)]
     timeout_secs: u64,
-    #[arg(long, value_enum, default_value_t = DocumentFallbackMode::Strict)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = DocumentFallbackMode::Strict,
+        help = "Document fallback policy: strict (default, generated-only) or breakglass (allow manual operation_documents/*.graphql)"
+    )]
     document_fallback_mode: DocumentFallbackMode,
 }
 
@@ -1161,6 +1174,10 @@ fn build_operation_document(
 }
 
 fn legacy_operation_document(resource_name: &str) -> Option<&'static str> {
+    // NOTE:
+    // These files are manually maintained breakglass assets.
+    // Normal operation should stay in strict mode and use introspection-generated
+    // operation documents from endpoint snapshot.
     match resource_name {
         "searchNote" => Some(include_str!("../operation_documents/search_note.graphql")),
         "searchFolder" => Some(include_str!("../operation_documents/search_folder.graphql")),
@@ -1623,8 +1640,10 @@ fn build_endpoint_snapshot_from_introspection(
         let document = if let Some(generated_document) =
             build_operation_document(definition, field_spec, &type_map)
         {
+            // Primary path: generate trusted document from live endpoint introspection.
             generated_document
         } else if fallback_mode.allow_legacy() {
+            // Emergency path only: use manual fallback template.
             legacy_operation_document(definition.name)
                 .map(str::to_string)
                 .ok_or_else(|| {
