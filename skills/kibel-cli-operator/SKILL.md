@@ -27,11 +27,11 @@ AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
@@ -40,11 +40,11 @@ SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)
   echo "search note smoke failed" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }

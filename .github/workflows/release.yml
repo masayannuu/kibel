@@ -33,6 +33,7 @@ jobs:
         run: |
           cargo run -p kibel-tools -- create-note-contract check
           cargo run -p kibel-tools -- resource-contract check
+          ./scripts/check_skill_safety.sh
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo test --workspace --all-features

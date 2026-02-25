@@ -1,7 +1,7 @@
 ---
 name: kibel-agentic-rag
 description: Use this skill for evidence-first RAG over Kibela using kibel CLI (retrieve -> verify -> cite).
-allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(jq:*)
+allowed-tools: Bash(kibel:--json auth status),Bash(kibel:--json auth login),Bash(kibel:--json search note),Bash(kibel:--json search user),Bash(kibel:--json note get),Bash(kibel:--json note get-many),Bash(kibel:--json note get-from-path),Bash(rg:*),Bash(jq:*)
 ---
 
 # kibel Agentic RAG
@@ -9,6 +9,7 @@ allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(jq:*)
 ## Goal
 
 Produce high-quality answers grounded in Kibela notes with explicit citations.
+Primary operating mode is Japanese-first retrieval for Japanese teams.
 
 ## Scope
 
@@ -30,11 +31,11 @@ AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
@@ -43,11 +44,11 @@ SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)
   echo "search note smoke failed" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }
@@ -95,23 +96,87 @@ Use `KIBEL_RAG_PROFILE` (default: `balanced`):
 - `balanced`: `first=16`, `max_rounds=2`, `max_note_fetch=8`, `max_cli_calls=16`
 - `deep`: `first=24`, `max_rounds=3`, `max_note_fetch=16`, `max_cli_calls=28`
 
+Corrective thresholds by profile:
+
+| profile | min_top5_relevance | min_must_have_evidence_hits |
+|---|---:|---:|
+| fast | 0.60 | 1 |
+| balanced | 0.75 | 2 |
+| deep | 0.85 | 2 |
+
+## Ambiguity planner (Japanese-first)
+
+Use this policy before retrieval.
+
+1. Detect query language: `ja / en / mixed`.
+2. Normalize query:
+   - trim extra spaces
+   - normalize full/half-width where possible
+   - keep original entity strings (project names, product names)
+3. Decompose ambiguity into facets:
+   - `intent` (what answer is needed)
+   - `target` (team/project/system/person)
+   - `artifact` (guide/spec/postmortem/runbook/policy)
+   - `time` (latest/current/specific period)
+   - `scope` (all-org vs team-local)
+4. Generate candidate queries from facets, not from fixed dictionaries.
+
+Candidate classes:
+
+- `anchor`: normalized original query
+- `artifact-focused`: intent + artifact
+- `scope-focused`: target + artifact or target + intent
+- `time-focused`: artifact + recency constraint words
+- `verification-focused`: claim-check style query for weak claims
+
+Candidate budget by profile:
+
+- `fast`: up to 2 candidates
+- `balanced`: up to 4 candidates
+- `deep`: up to 7 candidates
+
+Ranking priority:
+
+- optimize `top3-5` relevance first
+- allow some noise in `top10` only when it improves coverage
+
 ## Retrieval pipeline (Agentic RAG v2)
 
-1. `route_select`: classify question as `direct / multi_hop / global`.
-2. `seed_recall`: run broad query with profile-specific `first`.
-3. `frontier_expand`: generate 1-2 follow-up queries from top hits.
-4. `evidence_pull`: fetch full notes only for selected candidates.
-5. `corrective_loop`: if evidence is weak, re-search with rewritten query.
-6. `verification`: run CoVe-style claim checks before final answer.
-7. `finalize`: answer + evidence + unknowns.
+1. `ambiguity_planner`: normalize + decompose + generate candidate queries.
+2. `route_select`: classify question as `direct / multi_hop / global`.
+3. `seed_recall`: run broad query with profile-specific `first`.
+4. `frontier_expand`: generate 1-2 follow-up queries from top hits.
+5. `evidence_pull`: fetch full notes only for selected candidates.
+6. `corrective_loop`: if evidence is weak, re-search with rewritten query.
+7. `verification`: run CoVe-style claim checks before final answer.
+8. `finalize`: answer + evidence + unknowns.
 
 ### Pass 1: Recall
 
-Run 2-3 broad queries (synonyms allowed):
+Run broad queries using planner candidates:
 
 ```bash
 "${KBIN}" --json search note --query "<topic>" --first "${FIRST:-16}"
 ```
+
+Candidate loop example:
+
+```bash
+declare -a CANDIDATES=(
+  "<anchor_query>"
+  "<artifact_focused_query>"
+  "<scope_or_time_focused_query>"
+)
+for q in "${CANDIDATES[@]}"; do
+  "${KBIN}" --json search note --query "${q}" --first "${FIRST:-16}"
+done
+```
+
+Language fallback rule:
+
+- `ja`: keep all candidates Japanese-first
+- `en`: use mixed candidates (`ja + en`) when team docs are Japanese-heavy
+- `mixed`: prioritize candidates matching target team terminology
 
 When result volume is high, paginate forward with cursor:
 
@@ -178,11 +243,26 @@ CoVe-style minimum rule:
 - 裏取り質問ごとに最低1件 `note get` で本文確認する。
 - 裏取りできない主張は `Unknowns` に落とす。
 
+Japanese-first verification rule:
+
+- Prefer evidence whose title/body matches Japanese domain terminology used by the team.
+- If only English hits support a claim, keep the claim but mark terminology gap in `Unknowns`.
+
+Corrective trigger rule:
+
+- trigger corrective loop when any of the following holds:
+  - `top5_relevance < min_top5_relevance(profile)`
+  - `must_have_evidence_hits < min_must_have_evidence_hits(profile)`
+  - key facet (`artifact` or `target`) has no strong evidence
+  - claims conflict across sources
+- first corrective action: rewrite candidates using missing facet terms
+- second corrective action: narrow with filters (`group-id`, `folder-id`, `user-id`) when available
+
 ## Ranking rubric
 
 Prefer notes with:
 
-1. direct term overlap with question
+1. facet-aware overlap with candidate set (`intent/target/artifact/time`)
 2. recent `updatedAt` when recency matters
 3. stronger author/owner relevance
 4. concrete implementation details over generic summaries
@@ -220,4 +300,8 @@ Unknowns:
 - `references/workflow.md`: compact step-by-step workflow.
 - `templates/evidence_answer_template.md`: final response template.
 - `templates/profile_scorecard.md`: profile A/B evaluation sheet.
+- `templates/ambiguity_planner_card.md`: ambiguity decomposition worksheet.
+- `eval/dataset_v1.json`: reproducible question set (`>=20` cases).
+- `eval/run_eval_v1.js`: baseline/planner/planner+corrective evaluation runner.
 - `docs/agentic-rag-architecture.md`: architecture and KPI-based evaluation.
+- `docs/agentic-rag-evaluation-protocol.md`: evaluation contract and gates.

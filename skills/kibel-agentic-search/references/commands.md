@@ -18,39 +18,66 @@ If auth is not ready:
 kibel --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 ```
 
-## Core retrieval
+## Default retrieval (ambiguity-planner-first)
 
-Mine latest:
+### 1) Build candidate query set from facets
+
+Facet checklist:
+
+- intent
+- target
+- artifact
+- time
+- scope
+
+Candidate example:
 
 ```bash
-kibel --json search note --mine --first 10
+declare -a CANDIDATES=(
+  "<anchor_query>"
+  "<artifact_query>"
+  "<scope_or_time_query>"
+)
 ```
 
-`--mine` is exclusive. Do not combine with `--query`, `--user-id`, `--group-id`, `--folder-id`.
-
-Broad recall:
+### 2) Candidate recall loop
 
 ```bash
-kibel --json search note --query "<query>" --first 16
+for q in "${CANDIDATES[@]}"; do
+  kibel --json search note --query "${q}" --first 16
+done
 ```
 
-Count:
+Count per candidate:
 
 ```bash
-kibel --json search note --query "<query>" --first 16 | jq '.data.results | length'
+kibel --json search note --query "<candidate_query>" --first 16 | jq '.data.results | length'
 ```
 
 Cursor next page:
 
 ```bash
-kibel --json search note --query "<query>" --after "<cursor>" --first 16
+kibel --json search note --query "<candidate_query>" --after "<cursor>" --first 16
 ```
 
 Cursor:
 
 ```bash
-kibel --json search note --query "<query>" --first 16 | jq -r '.data.page_info.endCursor // empty'
+kibel --json search note --query "<candidate_query>" --first 16 | jq -r '.data.page_info.endCursor // empty'
 ```
+
+### 3) Precision narrowing
+
+```bash
+kibel --json search note \
+  --query "<candidate_query>" \
+  --user-id "<USER_ID>" \
+  --group-id "<GROUP_ID>" \
+  --folder-id "<FOLDER_ID>" \
+  --first 16
+```
+
+`--user-id` is optional. If unknown, narrow by group/folder first and verify candidates with `note get`.
 
 User discovery:
 
@@ -64,18 +91,30 @@ User count:
 kibel --json search user --query "<query>" --first 10 | jq '.data.users | length'
 ```
 
-Precision narrowing:
+### 4) Corrective loop trigger
+
+Re-run with rewritten candidates when:
+
+- `top5_relevance < 0.60/0.75/0.85` (`fast`/`balanced`/`deep`)
+- `must_have_evidence_hits < 1/2/2` (`fast`/`balanced`/`deep`)
+- key facets are missing
+- evidence conflicts
+
+## Fast-path fallback (single query)
+
+Use only for explicit low-latency retrieval:
 
 ```bash
-kibel --json search note \
-  --query "<query>" \
-  --user-id "<USER_ID>" \
-  --group-id "<GROUP_ID>" \
-  --folder-id "<FOLDER_ID>" \
-  --first 16
+kibel --json search note --query "<exact_query>" --first 16
 ```
 
-`--user-id` is optional. If unknown, run precision narrowing without it and verify candidates with `note get`.
+## Mine latest
+
+```bash
+kibel --json search note --mine --first 10
+```
+
+`--mine` is exclusive. Do not combine with `--query`, `--user-id`, `--group-id`, `--folder-id`.
 
 ## Verification
 
@@ -84,3 +123,5 @@ kibel --json note get --id "<NOTE_ID>"
 kibel --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 kibel --json note get-from-path --path "/notes/<number>"
 ```
+
+When returning high-precision results, claims without note-level verification must be placed in `Unknowns`.

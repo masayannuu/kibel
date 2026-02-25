@@ -45,3 +45,10 @@ Open each `SKILL.md` and execute the workflow as-is:
 
 - Official skills target distributed binaries: `kibel` must be available in `PATH`.
 - If your environment uses a custom install location, set `KIBEL_BIN=/absolute/path/to/kibel`.
+
+## References
+
+- `docs/agentic-rag-architecture.md`
+- `docs/agentic-rag-evaluation-2026-02-25.md`
+- `docs/agentic-rag-evaluation-protocol.md`
+- `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`

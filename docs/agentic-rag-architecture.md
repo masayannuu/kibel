@@ -8,15 +8,16 @@ Define the best current architecture for Kibela retrieval QA using `kibel` CLI, 
 
 ```mermaid
 flowchart TD
-  A["User Question"] --> B["route_select"]
-  B --> C["seed_recall (search note)"]
-  C --> D["frontier_expand (query rewrite / follow-up)"]
-  D --> E["evidence_pull (note get / get-many)"]
-  E --> F{"coverage sufficient?"}
-  F -->|No| G["corrective_loop (CRAG-style re-search)"]
-  G --> D
-  F -->|Yes| H["verification (CoVe-style claim checks)"]
-  H --> I["finalize: answer + evidence + unknowns"]
+  A["User Question"] --> B["ambiguity_planner (facet decomposition)"]
+  B --> C["route_select"]
+  C --> D["seed_recall (candidate search set)"]
+  D --> E["frontier_expand (follow-up candidate generation)"]
+  E --> F["evidence_pull (note get / get-many)"]
+  F --> G{"coverage sufficient?"}
+  G -->|No| H["corrective_loop (facet-driven re-search)"]
+  H --> E
+  G -->|Yes| I["verification (CoVe-style claim checks)"]
+  I --> J["finalize: answer + evidence + unknowns"]
 ```
 
 ## Route Selection
@@ -35,6 +36,26 @@ flowchart TD
 
 Default profile: `balanced`.
 
+Corrective thresholds by profile:
+
+| Profile | min_top5_relevance | min_must_have_evidence_hits |
+|---|---:|---:|
+| `fast` | 0.60 | 1 |
+| `balanced` | 0.75 | 2 |
+| `deep` | 0.85 | 2 |
+
+## Language Strategy
+
+- default: Japanese-first retrieval
+- candidate generation: keep original query and add facet-driven candidates (`intent/target/artifact/time`)
+- candidate budget:
+  - `fast`: up to 2 candidates
+  - `balanced`: up to 4 candidates
+  - `deep`: up to 7 candidates
+- when query language is mixed (`ja/en`), prioritize Japanese variants before fallback English variants
+
+Avoid fixed static synonym dictionaries as the primary strategy. Use ambiguity facets and corrective loops to adapt per question.
+
 ## Ranking and Stop Conditions
 
 Ranking signal:
@@ -48,6 +69,8 @@ Stop条件:
 - `max_cli_calls` 到達
 - 新規証拠増分ゼロが2回連続
 - 検証可能な主要主張をカバー済み
+- `top5` relevance is sufficient and verification is complete
+- `top5_relevance >= profile threshold` and `must_have_evidence_hits >= profile threshold`
 
 ## Output Contract
 
@@ -67,6 +90,10 @@ Stop条件:
 - `unknowns_rate`: 必要時に unknown を明示できた割合
 - `avg_cli_calls`: 1問あたりCLI呼び出し平均
 - `p95_latency_sec`: 95パーセンタイル応答時間
+- `top5_relevance`: 上位5件の人間評価適合率
+- `top10_relevance`: 上位10件の人間評価適合率
+- `corrective_trigger_rate`: corrective loop が発火した割合
+- `ambiguity_resolution_rate`: corrective 後に must-have evidence を満たした割合
 
 ## Experiment Protocol
 
@@ -78,6 +105,11 @@ Stop条件:
    - `balanced` が `answer_supported_rate >= 0.90`
    - `citation_precision >= 0.95`
    - `p95_latency_sec` が許容値内（運用SLOに合わせる）
+
+Reproducible protocol:
+
+- `docs/agentic-rag-evaluation-protocol.md`
+- Latest run example: `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`
 
 ## Recommended Default
 

@@ -45,5 +45,8 @@ jobs:
       - name: Verify all-resource contract snapshot/codegen
         run: cargo run -p kibel-tools -- resource-contract check
 
+      - name: Skill safety check
+        run: ./scripts/check_skill_safety.sh
+
       - name: Build kibel binary
         run: cargo build -p kibel

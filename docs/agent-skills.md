@@ -7,9 +7,9 @@ Provide official agent workflows so Codex/Claude Code can use `kibel` immediatel
 ## Skill Pack
 
 - `skills/kibel-agentic-search`
-  - Fast retrieval and narrowing workflow for Kibela notes.
+  - Ambiguity-planner-first retrieval workflow for Kibela notes.
 - `skills/kibel-agentic-rag`
-  - Route-select + corrective-loop + verification を含む Agentic RAG workflow.
+  - Ambiguity-planner + corrective-loop + verification を含む Agentic RAG workflow.
 - `skills/kibel-cli-operator`
   - Broad CLI operation skill including safe `graphql run` query workflows.
 
@@ -65,10 +65,14 @@ Treat each `SKILL.md` as an execution playbook and keep commands unchanged.
 詳細設計と評価指標は以下を参照:
 
 - `docs/agentic-rag-architecture.md`
+- `docs/agentic-rag-evaluation-2026-02-25.md`
+- `docs/agentic-rag-evaluation-protocol.md`
+- `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`
 
 ## Guardrails
 
 - Do not run write commands in search/RAG flows unless explicitly requested.
+- Read-only skill metadata is checked by `scripts/check_skill_safety.sh` in CI.
 - Keep `graphql run` in query-only mode for these skills.
 - Preserve machine-readable outputs (`--json`) for reproducibility.
 - If `auth status` is not ready, recover with `auth login --origin ... --team ...` before any retrieval flow.

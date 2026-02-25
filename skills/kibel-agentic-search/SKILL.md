@@ -1,16 +1,16 @@
 ---
 name: kibel-agentic-search
-description: Use this skill for fast and precise Kibela note retrieval via the official kibel CLI interfaces.
-allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(jq:*)
+description: Use this skill for high-precision Kibela note retrieval via ambiguity-planner-first workflows.
+allowed-tools: Bash(kibel:--json auth status),Bash(kibel:--json auth login),Bash(kibel:--json search note),Bash(kibel:--json search user),Bash(kibel:--json note get),Bash(kibel:--json note get-many),Bash(kibel:--json note get-from-path),Bash(rg:*),Bash(jq:*)
 ---
 
 # kibel Agentic Search
 
 ## When to use this
 
-- User asks to find relevant Kibela notes quickly.
+- User asks to find relevant Kibela notes with high precision.
 - User needs recent notes from self or specific users.
-- User needs query + filter narrowing with reproducible CLI commands.
+- User needs ambiguity-tolerant retrieval with reproducible CLI commands.
 
 ## Do not use this for
 
@@ -32,11 +32,11 @@ AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
@@ -45,11 +45,11 @@ SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)
   echo "search note smoke failed" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-echo "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }
@@ -84,8 +84,6 @@ Security note:
 - ローカル運用は interactive login を優先（keychain/config に保存）。
 - `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
 
-## Core retrieval flows
-
 ## Canonical JSON selectors
 
 - `search note` items: `.data.results[]`
@@ -93,7 +91,12 @@ Security note:
 - `search user` items: `.data.users[]`
 - `auth status`: `.data.logged_in`, `.data.team`, `.data.origin`
 
-### 1. Mine latest (high precision, low latency)
+## Retrieval strategy
+
+Default mode is ambiguity-planner-first retrieval.
+Single-query search is a fast-path fallback.
+
+### 1. Mine latest
 
 ```bash
 "${KBIN}" --json search note --mine --first 10
@@ -101,16 +104,49 @@ Security note:
 
 Use this when user intent is "my latest docs", "what I wrote recently", or "my notes list".
 
-### 2. Broad recall
+### 2. Ambiguity planner (default)
+
+Before retrieval, decompose the user question:
+
+- `intent`: what answer is needed
+- `target`: team/project/system/person
+- `artifact`: guide/spec/runbook/postmortem/policy
+- `time`: latest/current/specific period
+- `scope`: org-wide or local team scope
+
+Generate candidate queries from these facets (not single fixed keywords).
+
+Candidate budget:
+
+- `fast`: up to 2 candidates
+- `balanced`: up to 4 candidates
+- `deep`: up to 7 candidates
+
+Corrective thresholds by profile:
+
+| profile | min_top5_relevance | min_must_have_evidence_hits |
+|---|---:|---:|
+| fast | 0.60 | 1 |
+| balanced | 0.75 | 2 |
+| deep | 0.85 | 2 |
+
+### 3. Candidate recall (default)
 
 ```bash
-"${KBIN}" --json search note --query "<query>" --first 16
+declare -a CANDIDATES=(
+  "<anchor_query>"
+  "<artifact_query>"
+  "<scope_or_time_query>"
+)
+for q in "${CANDIDATES[@]}"; do
+  "${KBIN}" --json search note --query "${q}" --first 16
+done
 ```
 
-Cursor pagination:
+Cursor pagination per candidate:
 
 ```bash
-"${KBIN}" --json search note --query "<query>" --after "<cursor>" --first 16
+"${KBIN}" --json search note --query "<candidate_query>" --after "<cursor>" --first 16
 ```
 
 Optional reusable preset:
@@ -120,11 +156,11 @@ Optional reusable preset:
 "${KBIN}" --json search note --preset "<name>"
 ```
 
-### 3. Precision narrowing
+### 4. Precision narrowing
 
 ```bash
 "${KBIN}" --json search note \
-  --query "<query>" \
+  --query "<candidate_query>" \
   --user-id "<USER_ID>" \
   --group-id "<GROUP_ID>" \
   --folder-id "<FOLDER_ID>" \
@@ -143,9 +179,30 @@ Notes:
 "${KBIN}" --json search user --query "<query>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
 ```
 
-Then verify candidate notes.
+### 5. Corrective loop (required when evidence is weak)
 
-## Verification step (optional but recommended)
+Trigger when:
+
+- `top5_relevance < min_top5_relevance(profile)`
+- `must_have_evidence_hits < min_must_have_evidence_hits(profile)`
+- key facets (`artifact` / `target`) are missing
+- evidence conflicts
+
+Actions:
+
+1. rewrite candidate queries using missing facets
+2. re-run candidate recall within budget
+3. narrow by `group-id` / `folder-id` / optional `user-id`
+
+### Fast-path single query (fallback)
+
+Use only when query is explicit and low-latency is priority.
+
+```bash
+"${KBIN}" --json search note --query "<exact_query>" --first 16
+```
+
+## Verification step (required for high-precision output)
 
 Use result `id` or `path` to validate top hits:
 
@@ -155,11 +212,16 @@ Use result `id` or `path` to validate top hits:
 "${KBIN}" --json note get-from-path --path "/notes/<number>"
 ```
 
+High-precision rule:
+
+- If you claim high precision, every returned claim must have at least one `note get/get-many/get-from-path` evidence source.
+- If evidence cannot be fetched for a claim, move it to `Unknowns` and do not present it as confirmed.
+
 ## Output contract (agent response)
 
 Always return:
 
-1. query/filters used
+1. candidate queries and filters used
 2. top matches with title + URL + reason
 3. unknowns/gaps
 
@@ -167,7 +229,7 @@ Example format:
 
 ```text
 Search basis:
-- query: onboarding
+- candidates: ["オンボーディング資料", "受け入れマニュアル", "入社手順"]
 - filters: user-id=U1, group-id=G1
 
 Top matches:
@@ -181,4 +243,4 @@ Unknowns:
 ## References and templates
 
 - `references/commands.md`: compact command cookbook.
-- `templates/recall_precision_loop.sh`: one-shot query recall runner.
+- `templates/recall_precision_loop.sh`: recall runner (single query / candidate list).
