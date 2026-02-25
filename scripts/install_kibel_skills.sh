@@ -105,9 +105,10 @@ esac
 cmd=(
   "${python_bin}" "${installer}"
   --repo "${repo}"
-  --path skills/kibel-agentic-search
-  --path skills/kibel-agentic-rag
-  --path skills/kibel-cli-operator
+  --path
+  skills/kibel-agentic-search
+  skills/kibel-agentic-rag
+  skills/kibel-cli-operator
   --method "${method}"
 )
 
