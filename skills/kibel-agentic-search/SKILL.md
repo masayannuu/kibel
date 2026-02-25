@@ -36,11 +36,11 @@ AUTH_JSON="$("${KBIN}" auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"${AUTH_JSON}" || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data", {}).get("logged_in") is True else 1)' || {
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data", {}).get("logged_in") is True else 1)' <<<"${AUTH_JSON}" || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
@@ -49,11 +49,11 @@ SMOKE_JSON="$("${KBIN}" search note --query "test" --first 1 2>/dev/null)" || {
   echo "search note smoke failed" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"${SMOKE_JSON}" || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d.get("data", {}).get("results"), list) else 1)' || {
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d.get("data", {}).get("results"), list) else 1)' <<<"${SMOKE_JSON}" || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }

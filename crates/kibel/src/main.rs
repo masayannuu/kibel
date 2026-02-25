@@ -39,8 +39,8 @@ fn main() {
 
 fn run() -> i32 {
     let cli = cli::Cli::parse();
-    let json_mode = !cli.text
-        || cli.json
+    let json_mode = cli.json
+        || !cli.text
         || matches!(
             &cli.command,
             cli::Command::Version(cli::VersionArgs { json: true })

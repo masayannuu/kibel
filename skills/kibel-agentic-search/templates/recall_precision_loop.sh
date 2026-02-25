@@ -60,6 +60,13 @@ if len(candidates) > limits["max_candidates"]:
     )
     raise SystemExit(4)
 
+if len(candidates) > limits["max_cli_calls"]:
+    print(
+        f"cli call budget exceeded for profile={profile}: {len(candidates)} > {limits['max_cli_calls']}",
+        file=sys.stderr,
+    )
+    raise SystemExit(4)
+
 
 def run_kibel(args):
     proc = subprocess.run([kbin, *args], capture_output=True, text=True)
@@ -88,14 +95,7 @@ print(f"candidate_count={len(candidates)}")
 print(f"profile={profile}")
 print(f"max_cli_calls={limits['max_cli_calls']}")
 
-for idx, cand in enumerate(candidates, start=1):
-    if idx > limits["max_cli_calls"]:
-        print(
-            f"cli call budget exceeded for profile={profile}: {idx} > {limits['max_cli_calls']}",
-            file=sys.stderr,
-        )
-        raise SystemExit(4)
-
+for cand in candidates:
     payload = run_kibel(["search", "note", "--query", cand, "--first", str(first)])
     results = payload.get("data", {}).get("results")
     if not (payload.get("ok") is True and isinstance(results, list)):
@@ -104,7 +104,12 @@ for idx, cand in enumerate(candidates, start=1):
 
     page_info = payload.get("data", {}).get("page_info") or {}
     cursor = page_info.get("endCursor") or ""
-    elapsed = (payload.get("meta") or {}).get("elapsed_ms") or 0
+    elapsed_raw = (payload.get("meta") or {}).get("elapsed_ms")
+    try:
+        elapsed = int(0 if elapsed_raw is None else elapsed_raw)
+    except (TypeError, ValueError):
+        print("search note output shape mismatch: .meta.elapsed_ms must be numeric", file=sys.stderr)
+        raise SystemExit(3)
 
     print(f"candidate={cand}")
     print(f"result_count={len(results)}")
@@ -121,7 +126,7 @@ for idx, cand in enumerate(candidates, start=1):
                 "url": entry.get("url"),
             }
         )
-    latencies.append(int(elapsed))
+    latencies.append(elapsed)
 
 seen = set()
 merged = []
