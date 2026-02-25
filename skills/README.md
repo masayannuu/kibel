@@ -11,6 +11,18 @@ This directory contains official agent skills for `kibel`.
 ## Quick install (Codex)
 
 ```bash
+./scripts/install_kibel_skills.sh
+```
+
+Pinned install for reproducibility:
+
+```bash
+./scripts/install_kibel_skills.sh --ref v0.2.6
+```
+
+Fallback (manual skill-installer):
+
+```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
   --repo masayannuu/kibel \
   --path skills/kibel-agentic-search \

@@ -130,6 +130,20 @@ This repo ships official skills under `skills/`:
 Install (Codex):
 
 ```bash
+./scripts/install_kibel_skills.sh
+```
+
+Recommended for reproducibility:
+
+```bash
+./scripts/install_kibel_skills.sh --ref v0.2.6
+```
+
+Then restart Codex.
+
+Fallback (manual skill-installer):
+
+```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
   --repo masayannuu/kibel \
   --path skills/kibel-agentic-search \
@@ -137,7 +151,6 @@ python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/insta
   --path skills/kibel-cli-operator
 ```
 
-Then restart Codex.  
 For Claude Code, use the same `SKILL.md` files directly as execution playbooks.
 Skills are distribution-first: they assume `kibel` is installed in `PATH` (or override with `KIBEL_BIN`).
 
