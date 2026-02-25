@@ -28,10 +28,16 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
+
+      - name: Rust doctests
+        run: cargo test -p kibel-client --doc
+
+      - name: Rustdoc warnings
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
       - name: Verify schema contract snapshot/codegen
         run: cargo run -p kibel-tools -- create-note-contract check

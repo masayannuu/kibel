@@ -1,9 +1,11 @@
 use crate::error::KibelClientError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::fs;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,10 +17,14 @@ mod generated_resource_contracts;
 use self::generated_create_note_contract::{
     CREATE_NOTE_INPUT_FIELDS, CREATE_NOTE_NOTE_PROJECTION_FIELDS, CREATE_NOTE_PAYLOAD_FIELDS,
 };
-pub use self::generated_resource_contracts::ResourceContract;
+pub use self::generated_resource_contracts::{ResourceContract, TrustedOperation};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 const DEFAULT_FIRST: u32 = 16;
+const GRAPHQL_ACCEPT_HEADER: &str = "application/graphql-response+json, application/json;q=0.9";
+const APQ_VERSION: u64 = 1;
+const APQ_GET_VARIABLES_LIMIT_BYTES: usize = 1024;
+const SEARCH_NOTE_RESOURCE_KINDS: [&str; 3] = ["NOTE", "COMMENT", "ATTACHMENT"];
 
 const QUERY_NOTE_GET: &str = r"
 query NoteGet($id: ID!) {
@@ -57,6 +63,7 @@ query SearchNote(
   $coediting: Boolean
   $updated: SearchDate
   $groupIds: [ID!]
+  $userIds: [ID!]
   $folderIds: [ID!]
   $likerIds: [ID!]
   $isArchived: Boolean
@@ -69,6 +76,7 @@ query SearchNote(
     coediting: $coediting
     updated: $updated
     groupIds: $groupIds
+    userIds: $userIds
     folderIds: $folderIds
     likerIds: $likerIds
     isArchived: $isArchived
@@ -89,6 +97,37 @@ query SearchNote(
         author {
           account
           realName
+        }
+      }
+    }
+  }
+}
+";
+
+const QUERY_CURRENT_USER_ID: &str = r"
+query GetCurrentUserId {
+  currentUser {
+    id
+  }
+}
+";
+
+const QUERY_CURRENT_USER_LATEST_NOTES: &str = r"
+query GetCurrentUserLatestNotes($first: Int!) {
+  currentUser {
+    latestNotes(first: $first) {
+      edges {
+        node {
+          id
+          title
+          url
+          updatedAt
+          contentSummaryHtml
+          path
+          author {
+            account
+            realName
+          }
         }
       }
     }
@@ -428,6 +467,16 @@ pub fn resource_contract_upstream_commit() -> &'static str {
     generated_resource_contracts::RESOURCE_CONTRACT_UPSTREAM_COMMIT
 }
 
+#[must_use]
+pub fn trusted_operations() -> &'static [TrustedOperation] {
+    generated_resource_contracts::TRUSTED_OPERATIONS
+}
+
+#[must_use]
+pub fn trusted_operation_contract(operation: TrustedOperation) -> &'static ResourceContract {
+    generated_resource_contracts::trusted_operation_contract(operation)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub id: String,
@@ -474,6 +523,7 @@ pub struct SearchNoteInput {
     pub coediting: Option<bool>,
     pub updated: Option<String>,
     pub group_ids: Vec<String>,
+    pub user_ids: Vec<String>,
     pub folder_ids: Vec<String>,
     pub liker_ids: Vec<String>,
     pub is_archived: Option<bool>,
@@ -563,6 +613,18 @@ pub struct KibelClient {
     create_note_schema: Arc<Mutex<Option<CreateNoteSchema>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryTransportMode {
+    PostOnly,
+    TrustedQueryApqGet,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedGraphqlResponse {
+    payload: Value,
+    status_code: Option<u16>,
+}
+
 impl KibelClient {
     /// Builds a client for a Kibela origin and access token.
     ///
@@ -603,6 +665,38 @@ impl KibelClient {
         &self.origin
     }
 
+    /// Executes an ad-hoc GraphQL request outside the trusted operation registry.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when query or limits are invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn run_untrusted_graphql(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: usize,
+    ) -> Result<Value, KibelClientError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(KibelClientError::InputInvalid(
+                "query is required".to_string(),
+            ));
+        }
+        if max_response_bytes == 0 {
+            return Err(KibelClientError::InputInvalid(
+                "max response bytes must be greater than 0".to_string(),
+            ));
+        }
+        self.request_graphql_raw_with_limits(
+            query,
+            variables,
+            timeout_ms.max(100),
+            Some(max_response_bytes),
+            QueryTransportMode::PostOnly,
+        )
+    }
+
     /// Fetches a note by id.
     ///
     /// # Errors
@@ -616,7 +710,11 @@ impl KibelClient {
             ));
         }
 
-        let payload = self.request_graphql(QUERY_NOTE_GET, json!({ "id": id }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            json!({ "id": id }),
+        )?;
         parse_note_at(&payload, "/data/note")
     }
 
@@ -710,8 +808,11 @@ impl KibelClient {
         }
 
         let mutation = schema.create_note_mutation();
-        let payload =
-            self.request_graphql(&mutation, json!({ "input": Value::Object(gql_input) }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateNote,
+            &mutation,
+            json!({ "input": Value::Object(gql_input) }),
+        )?;
         let note = parse_create_note_at(&payload, "/data/createNote/note")?;
         let client_mutation_id = payload
             .pointer("/data/createNote/clientMutationId")
@@ -750,7 +851,8 @@ impl KibelClient {
             ));
         }
 
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::UpdateNoteContent,
             MUTATION_UPDATE_NOTE_CONTENT,
             json!({
                 "input": {
@@ -766,51 +868,17 @@ impl KibelClient {
     /// Searches notes.
     ///
     /// # Errors
-    /// Returns [`KibelClientError::InputInvalid`] when query/paging is invalid,
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
     /// or transport/API errors from GraphQL.
     pub fn search_note(&self, input: &SearchNoteInput) -> Result<Value, KibelClientError> {
-        let query = input.query.trim();
-        if query.is_empty() {
-            return Err(KibelClientError::InputInvalid(
-                "query is required".to_string(),
-            ));
-        }
         let first = normalize_first(input.first)?;
+        let variables = build_search_note_variables(input, first)?;
 
-        let mut variables = serde_json::Map::new();
-        variables.insert("query".to_string(), Value::String(query.to_string()));
-        variables.insert("first".to_string(), json!(first));
-
-        let resources = normalize_vec(&input.resources);
-        if !resources.is_empty() {
-            variables.insert("resources".to_string(), json!(resources));
-        }
-        if let Some(value) = input.coediting {
-            variables.insert("coediting".to_string(), Value::Bool(value));
-        }
-        if let Some(value) = input.updated.as_deref().and_then(normalize_optional) {
-            variables.insert("updated".to_string(), Value::String(value));
-        }
-        let group_ids = normalize_vec(&input.group_ids);
-        if !group_ids.is_empty() {
-            variables.insert("groupIds".to_string(), json!(group_ids));
-        }
-        let folder_ids = normalize_vec(&input.folder_ids);
-        if !folder_ids.is_empty() {
-            variables.insert("folderIds".to_string(), json!(folder_ids));
-        }
-        let liker_ids = normalize_vec(&input.liker_ids);
-        if !liker_ids.is_empty() {
-            variables.insert("likerIds".to_string(), json!(liker_ids));
-        }
-        if let Some(value) = input.is_archived {
-            variables.insert("isArchived".to_string(), Value::Bool(value));
-        }
-        if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
-            variables.insert("sortBy".to_string(), Value::String(value));
-        }
-
-        let payload = self.request_graphql(QUERY_SEARCH_NOTE, Value::Object(variables))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::SearchNote,
+            QUERY_SEARCH_NOTE,
+            Value::Object(variables),
+        )?;
         let edges = require_array_at(&payload, "/data/search/edges", "search result not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -819,6 +887,61 @@ impl KibelClient {
                 "id": node.pointer("/document/id").cloned().unwrap_or(Value::Null),
                 "title": node.get("title").cloned().unwrap_or(Value::Null),
                 "url": node.get("url").cloned().unwrap_or(Value::Null),
+                "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
+                "path": node.get("path").cloned().unwrap_or(Value::Null),
+                "author": {
+                    "account": node.pointer("/author/account").cloned().unwrap_or(Value::Null),
+                    "realName": node.pointer("/author/realName").cloned().unwrap_or(Value::Null),
+                }
+            }));
+        }
+        Ok(Value::Array(items))
+    }
+
+    /// Returns the current authenticated user id.
+    ///
+    /// # Errors
+    /// Returns transport/API errors from GraphQL, or [`KibelClientError::Api`]
+    /// when the current user payload is unavailable.
+    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
+        let payload = self.run_untrusted_graphql(
+            QUERY_CURRENT_USER_ID,
+            json!({}),
+            self.timeout_ms,
+            128 * 1024,
+        )?;
+        parse_current_user_id(&payload)
+    }
+
+    /// Returns latest notes for the current authenticated user.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn get_current_user_latest_notes(
+        &self,
+        input: PageInput,
+    ) -> Result<Value, KibelClientError> {
+        let first = normalize_first(input.first)?;
+        let payload = self.run_untrusted_graphql(
+            QUERY_CURRENT_USER_LATEST_NOTES,
+            json!({ "first": first }),
+            self.timeout_ms,
+            2 * 1024 * 1024,
+        )?;
+        let edges = require_array_at(
+            &payload,
+            "/data/currentUser/latestNotes/edges",
+            "current user latest notes not found",
+        )?;
+        let mut items = Vec::with_capacity(edges.len());
+        for edge in edges {
+            let node = edge.get("node").unwrap_or(&Value::Null);
+            items.push(json!({
+                "id": node.get("id").cloned().unwrap_or(Value::Null),
+                "title": node.get("title").cloned().unwrap_or(Value::Null),
+                "url": node.get("url").cloned().unwrap_or(Value::Null),
+                "updatedAt": node.get("updatedAt").cloned().unwrap_or(Value::Null),
                 "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
                 "path": node.get("path").cloned().unwrap_or(Value::Null),
                 "author": {
@@ -843,7 +966,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::SearchFolder,
             QUERY_SEARCH_FOLDER,
             json!({
                 "query": query,
@@ -877,7 +1001,11 @@ impl KibelClient {
     /// transport/API errors from GraphQL.
     pub fn get_groups(&self, input: PageInput) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(QUERY_GET_GROUPS, json!({ "first": first }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetGroups,
+            QUERY_GET_GROUPS,
+            json!({ "first": first }),
+        )?;
         let edges = require_array_at(&payload, "/data/groups/edges", "groups not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -899,7 +1027,11 @@ impl KibelClient {
     /// transport/API errors from GraphQL.
     pub fn get_folders(&self, input: PageInput) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(QUERY_GET_FOLDERS, json!({ "first": first }))?;
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolders,
+            QUERY_GET_FOLDERS,
+            json!({ "first": first }),
+        )?;
         let edges = require_array_at(&payload, "/data/folders/edges", "folders not found")?;
         let mut items = Vec::with_capacity(edges.len());
         for edge in edges {
@@ -925,7 +1057,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNotes,
             QUERY_GET_NOTES,
             json!({
                 "folderId": folder_id,
@@ -959,7 +1092,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetNoteFromPath,
             QUERY_GET_NOTE_FROM_PATH,
             json!({
                 "path": path,
@@ -982,7 +1116,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolder,
             QUERY_GET_FOLDER,
             json!({
                 "id": id,
@@ -1005,7 +1140,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFolderFromPath,
             QUERY_GET_FOLDER_FROM_PATH,
             json!({
                 "path": path,
@@ -1034,7 +1170,8 @@ impl KibelClient {
             ));
         }
         let first = normalize_first(input.first)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::GetFeedSections,
             QUERY_GET_FEED_SECTIONS,
             json!({
                 "kind": kind,
@@ -1070,7 +1207,8 @@ impl KibelClient {
                 "note id is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateComment,
             MUTATION_CREATE_COMMENT,
             json!({
                 "input": {
@@ -1107,7 +1245,8 @@ impl KibelClient {
                 "comment id is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateCommentReply,
             MUTATION_CREATE_COMMENT_REPLY,
             json!({
                 "input": {
@@ -1144,7 +1283,8 @@ impl KibelClient {
                 "full name is required".to_string(),
             ));
         }
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::CreateFolder,
             MUTATION_CREATE_FOLDER,
             json!({
                 "input": {
@@ -1179,7 +1319,8 @@ impl KibelClient {
         }
         let from_folder = normalize_folder(&input.from_folder)?;
         let to_folder = normalize_folder(&input.to_folder)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::MoveNoteToAnotherFolder,
             MUTATION_MOVE_NOTE_TO_ANOTHER_FOLDER,
             json!({
                 "input": {
@@ -1212,7 +1353,8 @@ impl KibelClient {
             ));
         }
         let folder = normalize_folder(&input.folder)?;
-        let payload = self.request_graphql(
+        let payload = self.request_trusted_graphql(
+            TrustedOperation::AttachNoteToFolder,
             MUTATION_ATTACH_NOTE_TO_FOLDER,
             json!({
                 "input": {
@@ -1228,12 +1370,47 @@ impl KibelClient {
         )
     }
 
-    fn request_graphql(&self, query: &str, variables: Value) -> Result<Value, KibelClientError> {
-        let timeout = Duration::from_millis(self.timeout_ms.max(100));
-        let payload = Value::Object(serde_json::Map::from_iter([
-            ("query".to_string(), Value::String(query.to_string())),
-            ("variables".to_string(), variables),
-        ]));
+    fn request_trusted_graphql(
+        &self,
+        operation: TrustedOperation,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value, KibelClientError> {
+        validate_trusted_operation_request(operation, query, &variables)?;
+        let mode = match trusted_operation_contract(operation).kind {
+            "query" => QueryTransportMode::TrustedQueryApqGet,
+            _ => QueryTransportMode::PostOnly,
+        };
+        self.request_graphql_raw_with_limits(query, variables, self.timeout_ms, None, mode)
+    }
+
+    fn request_graphql_raw(
+        &self,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value, KibelClientError> {
+        self.request_graphql_raw_with_limits(
+            query,
+            variables,
+            self.timeout_ms,
+            None,
+            QueryTransportMode::PostOnly,
+        )
+    }
+
+    fn request_graphql_raw_with_limits(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: Option<usize>,
+        mode: QueryTransportMode,
+    ) -> Result<Value, KibelClientError> {
+        let timeout = Duration::from_millis(timeout_ms.max(100));
+        let payload = json!({
+            "query": query,
+            "variables": variables.clone(),
+        });
         let payload_raw = payload.to_string();
 
         test_capture_request_payload(&payload_raw)?;
@@ -1249,23 +1426,106 @@ impl KibelClient {
             return Ok(parsed);
         }
 
+        let parsed = match mode {
+            QueryTransportMode::PostOnly => {
+                self.request_graphql_post(timeout, max_response_bytes, query, &variables, None)?
+            }
+            QueryTransportMode::TrustedQueryApqGet => {
+                self.request_trusted_query_with_apq(timeout, max_response_bytes, query, &variables)?
+            }
+        };
+
+        finalize_graphql_response(parsed)
+    }
+
+    fn request_trusted_query_with_apq(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        query: &str,
+        variables: &Value,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let persisted_hash = sha256_hex(query);
+        let extensions = json!({
+            "persistedQuery": {
+                "version": APQ_VERSION,
+                "sha256Hash": persisted_hash,
+            }
+        });
+
+        let variables_raw = serde_json::to_string(variables)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
+
+        if variables_raw.len() > APQ_GET_VARIABLES_LIMIT_BYTES {
+            return self.request_graphql_post(
+                timeout,
+                max_response_bytes,
+                query,
+                variables,
+                Some(&extensions),
+            );
+        }
+
+        let get_response = self.request_graphql_get_hash_only(
+            timeout,
+            max_response_bytes,
+            variables,
+            &extensions,
+        )?;
+        if should_fallback_apq_status(get_response.status_code) {
+            return self.request_graphql_post(timeout, max_response_bytes, query, variables, None);
+        }
+
+        let Some((error_code, message)) = extract_graphql_error(&get_response.payload) else {
+            return Ok(get_response);
+        };
+
+        if is_persisted_query_not_found(&error_code, &message) {
+            return self.request_graphql_post(
+                timeout,
+                max_response_bytes,
+                query,
+                variables,
+                Some(&extensions),
+            );
+        }
+        if is_persisted_query_not_supported(&error_code, &message) {
+            return self.request_graphql_post(timeout, max_response_bytes, query, variables, None);
+        }
+
+        Ok(get_response)
+    }
+
+    fn request_graphql_post(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        query: &str,
+        variables: &Value,
+        extensions: Option<&Value>,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let mut payload_object = serde_json::Map::new();
+        payload_object.insert("query".to_string(), Value::String(query.to_string()));
+        payload_object.insert("variables".to_string(), variables.clone());
+        if let Some(extensions) = extensions {
+            payload_object.insert("extensions".to_string(), extensions.clone());
+        }
+        let payload_raw = Value::Object(payload_object).to_string();
+
         let agent = ureq::AgentBuilder::new().timeout(timeout).build();
         let request = agent
             .post(&self.endpoint)
             .set("Content-Type", "application/json")
+            .set("Accept", GRAPHQL_ACCEPT_HEADER)
             .set("Authorization", &format!("Bearer {}", self.token));
 
         let (raw, status_code) = match request.send_string(&payload_raw) {
             Ok(response) => {
-                let body = response
-                    .into_string()
-                    .map_err(|err| KibelClientError::Transport(err.to_string()))?;
+                let body = read_response_body(response, max_response_bytes)?;
                 (body, None)
             }
             Err(ureq::Error::Status(code, response)) => {
-                let body = response
-                    .into_string()
-                    .map_err(|err| KibelClientError::Transport(err.to_string()))?;
+                let body = read_response_body(response, max_response_bytes)?;
                 (body, Some(code))
             }
             Err(err) => {
@@ -1273,20 +1533,44 @@ impl KibelClient {
             }
         };
 
-        let parsed = serde_json::from_str::<Value>(&raw)
-            .map_err(|err| KibelClientError::Transport(format!("invalid JSON response: {err}")))?;
+        parse_http_response(raw, status_code)
+    }
 
-        if let Some((code, message)) = extract_graphql_error(&parsed) {
-            return Err(KibelClientError::Api { code, message });
-        }
+    fn request_graphql_get_hash_only(
+        &self,
+        timeout: Duration,
+        max_response_bytes: Option<usize>,
+        variables: &Value,
+        extensions: &Value,
+    ) -> Result<ParsedGraphqlResponse, KibelClientError> {
+        let variables_raw = serde_json::to_string(variables)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
+        let extensions_raw = serde_json::to_string(extensions)
+            .map_err(|error| KibelClientError::Transport(format!("json render failed: {error}")))?;
 
-        if let Some(code) = status_code {
-            return Err(KibelClientError::Transport(format!(
-                "http status {code} without graphql errors"
-            )));
-        }
+        let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+        let request = agent
+            .get(&self.endpoint)
+            .query("variables", &variables_raw)
+            .query("extensions", &extensions_raw)
+            .set("Accept", GRAPHQL_ACCEPT_HEADER)
+            .set("Authorization", &format!("Bearer {}", self.token));
 
-        Ok(parsed)
+        let (raw, status_code) = match request.call() {
+            Ok(response) => {
+                let body = read_response_body(response, max_response_bytes)?;
+                (body, None)
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = read_response_body(response, max_response_bytes)?;
+                (body, Some(code))
+            }
+            Err(err) => {
+                return Err(KibelClientError::Transport(err.to_string()));
+            }
+        };
+
+        parse_http_response(raw, status_code)
     }
 
     fn resolve_create_note_schema(&self) -> CreateNoteSchema {
@@ -1302,7 +1586,7 @@ impl KibelClient {
             }
         }
 
-        if let Ok(payload) = self.request_graphql(QUERY_CREATE_NOTE_SCHEMA, json!({})) {
+        if let Ok(payload) = self.request_graphql_raw(QUERY_CREATE_NOTE_SCHEMA, json!({})) {
             if let Some(schema) = CreateNoteSchema::from_introspection(&payload) {
                 if let Ok(mut guard) = self.create_note_schema.lock() {
                     *guard = Some(schema.clone());
@@ -1320,6 +1604,248 @@ fn endpoint_from_origin(origin: &str) -> String {
         normalized.to_string()
     } else {
         format!("{normalized}/api/v1")
+    }
+}
+
+fn read_response_body(
+    response: ureq::Response,
+    max_response_bytes: Option<usize>,
+) -> Result<String, KibelClientError> {
+    match max_response_bytes {
+        Some(limit) => {
+            let mut buffer = Vec::new();
+            response
+                .into_reader()
+                .take((limit.saturating_add(1)) as u64)
+                .read_to_end(&mut buffer)
+                .map_err(|error| KibelClientError::Transport(error.to_string()))?;
+            if buffer.len() > limit {
+                return Err(KibelClientError::Transport(format!(
+                    "response body exceeds limit: {limit} bytes"
+                )));
+            }
+            String::from_utf8(buffer)
+                .map_err(|error| KibelClientError::Transport(error.to_string()))
+        }
+        None => response
+            .into_string()
+            .map_err(|error| KibelClientError::Transport(error.to_string())),
+    }
+}
+
+fn parse_http_response(
+    raw: String,
+    status_code: Option<u16>,
+) -> Result<ParsedGraphqlResponse, KibelClientError> {
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| KibelClientError::Transport(format!("invalid JSON response: {error}")))?;
+    Ok(ParsedGraphqlResponse {
+        payload,
+        status_code,
+    })
+}
+
+fn finalize_graphql_response(response: ParsedGraphqlResponse) -> Result<Value, KibelClientError> {
+    if let Some((code, message)) = extract_graphql_error(&response.payload) {
+        return Err(KibelClientError::Api { code, message });
+    }
+    if let Some(code) = response.status_code {
+        return Err(KibelClientError::Transport(format!(
+            "http status {code} without graphql errors"
+        )));
+    }
+    Ok(response.payload)
+}
+
+fn should_fallback_apq_status(status_code: Option<u16>) -> bool {
+    matches!(
+        status_code,
+        Some(400 | 404 | 405 | 406 | 414 | 415 | 422 | 501)
+    )
+}
+
+fn is_persisted_query_not_found(code: &str, message: &str) -> bool {
+    code.eq_ignore_ascii_case("PERSISTED_QUERY_NOT_FOUND")
+        || message
+            .to_ascii_uppercase()
+            .contains("PERSISTED_QUERY_NOT_FOUND")
+}
+
+fn is_persisted_query_not_supported(code: &str, message: &str) -> bool {
+    code.eq_ignore_ascii_case("PERSISTED_QUERY_NOT_SUPPORTED")
+        || message
+            .to_ascii_uppercase()
+            .contains("PERSISTED_QUERY_NOT_SUPPORTED")
+}
+
+fn sha256_hex(raw: &str) -> String {
+    let digest = Sha256::digest(raw.as_bytes());
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
+fn validate_trusted_operation_request(
+    operation: TrustedOperation,
+    query: &str,
+    variables: &Value,
+) -> Result<(), KibelClientError> {
+    let contract = trusted_operation_contract(operation);
+    let expected_root = contract
+        .graphql_file
+        .rsplit('.')
+        .next()
+        .ok_or_else(|| {
+            KibelClientError::Transport(format!(
+                "invalid graphql_file format in contract: {}",
+                contract.graphql_file
+            ))
+        })?
+        .trim();
+    if expected_root.is_empty() {
+        return Err(KibelClientError::Transport(
+            "empty root field in trusted contract".to_string(),
+        ));
+    }
+
+    let actual_root = extract_root_field(query).ok_or_else(|| {
+        KibelClientError::Transport(format!(
+            "failed to extract root field for trusted operation `{}`",
+            contract.name
+        ))
+    })?;
+    if actual_root != expected_root {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` root field mismatch: expected `{}`, got `{}`",
+            contract.name, expected_root, actual_root
+        )));
+    }
+
+    let declared_variables = extract_declared_variables(query);
+    let missing_declarations = contract
+        .required_variables
+        .iter()
+        .filter(|name| !declared_variables.contains(**name))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_declarations.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` required variable(s) are not declared in query: {}",
+            contract.name,
+            missing_declarations.join(", ")
+        )));
+    }
+
+    let object = variables.as_object().ok_or_else(|| {
+        KibelClientError::Transport(format!(
+            "trusted operation `{}` requires JSON object variables",
+            contract.name
+        ))
+    })?;
+
+    let missing_required = contract
+        .required_variables
+        .iter()
+        .filter(|name| object.get(**name).is_none_or(Value::is_null))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_required.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` missing required variable(s): {}",
+            contract.name,
+            missing_required.join(", ")
+        )));
+    }
+
+    let unsupported = object
+        .keys()
+        .filter(|name| !declared_variables.contains(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unsupported.is_empty() {
+        return Err(KibelClientError::Transport(format!(
+            "trusted operation `{}` has undeclared variable(s): {}",
+            contract.name,
+            unsupported.join(", ")
+        )));
+    }
+
+    Ok(())
+}
+
+fn extract_root_field(query: &str) -> Option<String> {
+    let start = query.find('{')? + 1;
+    let bytes = query.as_bytes();
+    let mut index = start;
+
+    skip_whitespace(bytes, &mut index);
+    let mut field = read_identifier(bytes, &mut index)?;
+    skip_whitespace(bytes, &mut index);
+
+    if bytes.get(index).copied() == Some(b':') {
+        index += 1;
+        skip_whitespace(bytes, &mut index);
+        field = read_identifier(bytes, &mut index)?;
+    }
+
+    Some(field)
+}
+
+fn extract_declared_variables(query: &str) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    let header_end = query.find('{').unwrap_or(query.len());
+    let bytes = query.as_bytes();
+    let mut index = 0;
+
+    while index < header_end {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        let start = index;
+        while index < header_end {
+            let c = bytes[index];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        if index > start {
+            if let Ok(name) = std::str::from_utf8(&bytes[start..index]) {
+                set.insert(name.to_string());
+            }
+        }
+    }
+
+    set
+}
+
+fn skip_whitespace(bytes: &[u8], index: &mut usize) {
+    while *index < bytes.len() && bytes[*index].is_ascii_whitespace() {
+        *index += 1;
+    }
+}
+
+fn read_identifier(bytes: &[u8], index: &mut usize) -> Option<String> {
+    let start = *index;
+    while *index < bytes.len() {
+        let c = bytes[*index];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            *index += 1;
+        } else {
+            break;
+        }
+    }
+    if *index == start {
+        None
+    } else {
+        std::str::from_utf8(&bytes[start..*index])
+            .ok()
+            .map(str::to_string)
     }
 }
 
@@ -1404,6 +1930,84 @@ fn require_value_at(
         });
     }
     Ok(value)
+}
+
+fn parse_current_user_id(payload: &Value) -> Result<String, KibelClientError> {
+    let user = require_value_at(payload, "/data/currentUser", "current user not found")?;
+    let id = user
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| KibelClientError::Api {
+            code: "NOT_FOUND".to_string(),
+            message: "current user id not found".to_string(),
+        })?;
+    Ok(id.to_string())
+}
+
+fn build_search_note_variables(
+    input: &SearchNoteInput,
+    first: u32,
+) -> Result<serde_json::Map<String, Value>, KibelClientError> {
+    let mut variables = serde_json::Map::new();
+    variables.insert(
+        "query".to_string(),
+        Value::String(input.query.trim().to_string()),
+    );
+    variables.insert("first".to_string(), json!(first));
+
+    let resources = normalize_search_note_resources(&input.resources)?;
+    if resources.is_empty() {
+        variables.insert("resources".to_string(), json!(["NOTE"]));
+    } else {
+        variables.insert("resources".to_string(), json!(resources));
+    }
+    if let Some(value) = input.coediting {
+        variables.insert("coediting".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = input.updated.as_deref().and_then(normalize_optional) {
+        variables.insert("updated".to_string(), Value::String(value));
+    }
+    let group_ids = normalize_vec(&input.group_ids);
+    if !group_ids.is_empty() {
+        variables.insert("groupIds".to_string(), json!(group_ids));
+    }
+    let user_ids = normalize_vec(&input.user_ids);
+    if !user_ids.is_empty() {
+        variables.insert("userIds".to_string(), json!(user_ids));
+    }
+    let folder_ids = normalize_vec(&input.folder_ids);
+    if !folder_ids.is_empty() {
+        variables.insert("folderIds".to_string(), json!(folder_ids));
+    }
+    let liker_ids = normalize_vec(&input.liker_ids);
+    if !liker_ids.is_empty() {
+        variables.insert("likerIds".to_string(), json!(liker_ids));
+    }
+    if let Some(value) = input.is_archived {
+        variables.insert("isArchived".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
+        variables.insert("sortBy".to_string(), Value::String(value));
+    }
+    Ok(variables)
+}
+
+fn normalize_search_note_resources(resources: &[String]) -> Result<Vec<String>, KibelClientError> {
+    let normalized = normalize_vec(resources)
+        .into_iter()
+        .map(|value| value.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    for value in &normalized {
+        if !SEARCH_NOTE_RESOURCE_KINDS.contains(&value.as_str()) {
+            return Err(KibelClientError::InputInvalid(format!(
+                "resource must be one of: {}",
+                SEARCH_NOTE_RESOURCE_KINDS.join(", ")
+            )));
+        }
+    }
+    Ok(normalized)
 }
 
 fn extract_graphql_error(payload: &Value) -> Option<(String, String)> {
@@ -1523,13 +2127,26 @@ fn fixture_response_env_set() -> bool {
 }
 
 fn should_skip_runtime_introspection() -> bool {
-    if let Ok(raw) = std::env::var("KIBEL_DISABLE_RUNTIME_INTROSPECTION") {
-        let normalized = raw.trim().to_ascii_lowercase();
-        if normalized == "1" || normalized == "true" || normalized == "yes" {
-            return true;
-        }
+    if fixture_response_env_set() {
+        return true;
     }
-    fixture_response_env_set()
+    if env_flag_is_true("KIBEL_ENABLE_RUNTIME_INTROSPECTION") {
+        return false;
+    }
+    if env_flag_is_true("KIBEL_DISABLE_RUNTIME_INTROSPECTION") {
+        return true;
+    }
+    true
+}
+
+fn env_flag_is_true(name: &str) -> bool {
+    let Ok(raw) = std::env::var(name) else {
+        return false;
+    };
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -1659,10 +2276,13 @@ fn collect_name_set(value: &Value) -> BTreeSet<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_name_set, endpoint_from_origin, extract_graphql_error,
-        load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
-        resource_contract_version, resource_contracts, should_skip_runtime_introspection,
-        CreateNoteInput, CreateNoteSchema, KibelClient,
+        build_search_note_variables, collect_name_set, endpoint_from_origin, extract_graphql_error,
+        extract_root_field, is_persisted_query_not_found, is_persisted_query_not_supported,
+        load_schema_fixture_from_env, parse_create_note_at, parse_current_user_id,
+        resource_contract_upstream_commit, resource_contract_version, resource_contracts,
+        should_fallback_apq_status, should_skip_runtime_introspection, trusted_operation_contract,
+        trusted_operations, validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema,
+        KibelClient, SearchNoteInput, TrustedOperation, QUERY_GET_FOLDER, QUERY_NOTE_GET,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -1785,6 +2405,37 @@ mod tests {
     }
 
     #[test]
+    fn should_skip_runtime_introspection_by_default() {
+        std::env::remove_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_DISABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_TEST_GRAPHQL_RESPONSE");
+        assert!(should_skip_runtime_introspection());
+    }
+
+    #[test]
+    fn should_allow_runtime_introspection_when_explicitly_enabled() {
+        std::env::set_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION", "1");
+        std::env::remove_var("KIBEL_DISABLE_RUNTIME_INTROSPECTION");
+        std::env::remove_var("KIBEL_TEST_GRAPHQL_RESPONSE");
+        assert!(!should_skip_runtime_introspection());
+        std::env::remove_var("KIBEL_ENABLE_RUNTIME_INTROSPECTION");
+    }
+
+    #[test]
+    fn apq_error_helpers_detect_known_errors() {
+        assert!(is_persisted_query_not_found(
+            "PERSISTED_QUERY_NOT_FOUND",
+            "PersistedQueryNotFound"
+        ));
+        assert!(is_persisted_query_not_supported(
+            "PERSISTED_QUERY_NOT_SUPPORTED",
+            "PersistedQueryNotSupported"
+        ));
+        assert!(should_fallback_apq_status(Some(405)));
+        assert!(!should_fallback_apq_status(Some(200)));
+    }
+
+    #[test]
     fn collect_name_set_ignores_empty_values() {
         let names = collect_name_set(&json!([
             { "name": "title" },
@@ -1842,6 +2493,97 @@ mod tests {
     }
 
     #[test]
+    fn trusted_operations_cover_all_resource_contracts() {
+        let operations = trusted_operations();
+        let contracts = resource_contracts();
+        assert_eq!(operations.len(), contracts.len());
+        for operation in operations {
+            let contract = trusted_operation_contract(*operation);
+            assert!(contracts.iter().any(|item| item.name == contract.name));
+        }
+    }
+
+    #[test]
+    fn extract_root_field_supports_alias() {
+        let query = r#"
+query AliasQuery($id: ID!) {
+  item: note(id: $id) {
+    id
+  }
+}
+"#;
+        let root = extract_root_field(query).expect("root should be parsed");
+        assert_eq!(root, "note");
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_missing_required_variable() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            &json!({}),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("missing required variable(s): id"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_unsupported_variable() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_NOTE_GET,
+            &json!({
+                "id": "N1",
+                "first": 16,
+            }),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("undeclared variable(s): first"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trusted_operation_validation_allows_declared_non_root_variables() {
+        validate_trusted_operation_request(
+            TrustedOperation::GetFolder,
+            QUERY_GET_FOLDER,
+            &json!({
+                "id": "F1",
+                "first": 1,
+            }),
+        )
+        .expect("validation should accept declared variable");
+    }
+
+    #[test]
+    fn trusted_operation_validation_rejects_root_field_mismatch() {
+        let error = validate_trusted_operation_request(
+            TrustedOperation::GetNote,
+            QUERY_GET_FOLDER,
+            &json!({
+                "id": "F1",
+                "first": 1,
+            }),
+        )
+        .expect_err("validation should fail");
+        match error {
+            super::KibelClientError::Transport(message) => {
+                assert!(message.contains("root field mismatch"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn create_note_rejects_blank_group_ids() {
         let client = KibelClient::new("https://example.kibe.la", "test-token")
             .expect("client should be created");
@@ -1895,5 +2637,111 @@ mod tests {
             json!(["G1", "G2"])
         );
         std::env::remove_var("KIBEL_TEST_CAPTURE_REQUEST_PATH");
+    }
+
+    #[test]
+    fn build_search_note_variables_defaults_resource_to_note() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "".to_string(),
+                resources: vec![],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("query"), Some(&json!("")));
+        assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_normalizes_user_ids() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec!["note".to_string()],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![" U1 ".to_string(), " ".to_string(), "U2".to_string()],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
+        assert_eq!(variables.get("userIds"), Some(&json!(["U1", "U2"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_rejects_unknown_resource() {
+        let error = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec!["unknown".to_string()],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+            },
+            10,
+        )
+        .expect_err("unknown resource must fail");
+        match error {
+            super::KibelClientError::InputInvalid(message) => {
+                assert_eq!(
+                    message,
+                    "resource must be one of: NOTE, COMMENT, ATTACHMENT"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_current_user_id_accepts_valid_payload() {
+        let id = parse_current_user_id(&json!({
+            "data": {
+                "currentUser": {
+                    "id": " U1 "
+                }
+            }
+        }))
+        .expect("current user id should parse");
+        assert_eq!(id, "U1");
+    }
+
+    #[test]
+    fn parse_current_user_id_rejects_missing_id() {
+        let error = parse_current_user_id(&json!({
+            "data": {
+                "currentUser": {}
+            }
+        }))
+        .expect_err("missing current user id should fail");
+        match error {
+            super::KibelClientError::Api { code, message } => {
+                assert_eq!(code, "NOT_FOUND");
+                assert_eq!(message, "current user id not found");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

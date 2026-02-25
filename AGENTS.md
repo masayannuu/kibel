@@ -8,6 +8,8 @@ Build and maintain a production-grade Kibela CLI + reusable Rust client library.
 
 - README.md
 - docs/implementation-policy.md
+- docs/cli-interface.md
+- docs/agent-skills.md
 - docs/architecture.md
 - docs/schema-lifecycle.md
 - docs/maintenance.md
@@ -18,7 +20,15 @@ Schema contracts:
 - research/schema/resource_contracts.endpoint.snapshot.json
 - research/schema/resource_contracts.snapshot.json
 
-Primary external reference for behavior consistency:
+Endpoint snapshot refresh:
+
+- `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --token "$KIBELA_ACCESS_TOKEN"`
+
+Primary schema source:
+
+- `research/schema/resource_contracts.endpoint.snapshot.json` (derived from Kibela GraphQL endpoint introspection via `kibel-tools`)
+
+Secondary external reference for behavior consistency:
 
 - https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/kibela.ts
 - https://github.com/kibela/kibela-mcp-server/blob/main/src/lib/schemas.ts
@@ -56,6 +66,8 @@ Primary external reference for behavior consistency:
   - `cargo run -p kibel-tools -- create-note-contract check`
   - `cargo run -p kibel-tools -- resource-contract check`
   - `cargo fmt --all --check`
-  - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace`
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  - `cargo test --workspace --all-features`
+  - `cargo test -p kibel-client --doc`
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
   - `cargo package --locked -p kibel-client`

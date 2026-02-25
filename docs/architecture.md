@@ -36,4 +36,14 @@
 - モデルは「必要十分」: CLIで利用するフィールドだけを厳選し、過剰な静的型を避ける。
 - 契約管理は endpoint snapshot 起点の単一路線:
   - CI基準: endpoint introspection snapshot から作る snapshot/codegen
+  - refresh: `kibel-tools resource-contract refresh-endpoint`
+- built-in 操作は generated trusted operation registry を経由して実行前検証する。
+- `graphql run` は trusted registry外の明示経路として、guardrail 適用後に実行する。
+  - mutation は `--allow-mutation` が必須。
+  - mutation root field は trusted resource contract 由来 allowlist に含まれるものだけ許可（危険操作の既定拒否）。
+- GraphQL-over-HTTP transport:
+  - `Accept: application/graphql-response+json, application/json;q=0.9` を送信する。
+  - trusted query は persisted-hash GET を試行し、未対応時は安全に POST fallback する。
+  - mutation と untrusted lane は POST を維持する。
+- createNote runtime introspection は default OFF（`KIBEL_ENABLE_RUNTIME_INTROSPECTION=1` のときのみ有効化）。
 - 仕様差異がある場合は runtime introspection か fallback contract で吸収する（現在 createNote）。
