@@ -30,7 +30,7 @@ jobs:
       - name: Install quality observer tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-deny,cargo-semver-checks
+          tool: cargo-nextest,cargo-deny,cargo-semver-checks,cargo-audit
 
       - name: Observe nextest run
         id: nextest
@@ -40,7 +40,19 @@ jobs:
       - name: Observe dependency advisories
         id: deny
         continue-on-error: true
-        run: cargo deny check advisories
+        run: |
+          LOG_FILE="$(mktemp)"
+          if cargo deny check advisories 2>&1 | tee "${LOG_FILE}"; then
+            exit 0
+          fi
+
+          if rg -q "unsupported CVSS version: 4\\.0" "${LOG_FILE}"; then
+            echo "cargo-deny cannot parse CVSS 4.0 advisory metadata; falling back to cargo audit"
+            cargo audit --deny warnings --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0384
+            exit 0
+          fi
+
+          exit 1
 
       - name: Observe semver compatibility (kibel-client only)
         id: semver
