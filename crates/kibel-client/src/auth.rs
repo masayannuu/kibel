@@ -27,6 +27,13 @@ pub struct ResolveTokenInput {
 }
 
 /// Returns a stable label string for token source reporting.
+///
+/// # Examples
+/// ```
+/// use kibel_client::{token_source_label, TokenSource};
+///
+/// assert_eq!(token_source_label(TokenSource::Env), "env");
+/// ```
 #[must_use]
 pub fn token_source_label(source: TokenSource) -> &'static str {
     match source {
@@ -38,6 +45,17 @@ pub fn token_source_label(source: TokenSource) -> &'static str {
 }
 
 /// Resolves effective team from request/config and fails when absent.
+///
+/// # Examples
+/// ```
+/// use kibel_client::{require_team, Config};
+///
+/// let mut config = Config::default();
+/// assert_eq!(require_team(Some("acme"), &config).unwrap(), "acme");
+///
+/// config.set_default_team("spike");
+/// assert_eq!(require_team(None, &config).unwrap(), "spike");
+/// ```
 ///
 /// # Errors
 /// Returns [`KibelClientError::InputInvalid`] when neither `requested_team` nor
@@ -58,6 +76,17 @@ pub fn require_team(
 /// Subject format:
 /// - with origin: `origin::<normalized-origin>::team::<team>`
 /// - legacy fallback: `<team>`
+///
+/// # Examples
+/// ```
+/// use kibel_client::token_store_subject;
+///
+/// assert_eq!(
+///     token_store_subject("acme", Some("https://ACME.kibe.la/")),
+///     "origin::https://acme.kibe.la::team::acme"
+/// );
+/// assert_eq!(token_store_subject("acme", None), "acme");
+/// ```
 #[must_use]
 pub fn token_store_subject(team: &str, origin: Option<&str>) -> String {
     match normalize_origin(origin) {
@@ -68,6 +97,23 @@ pub fn token_store_subject(team: &str, origin: Option<&str>) -> String {
 
 /// Resolves an access token using fixed precedence:
 /// stdin > env > keychain > config.
+///
+/// # Examples
+/// ```
+/// use kibel_client::{resolve_access_token, Config, InMemoryTokenStore, ResolveTokenInput};
+///
+/// let config = Config::default();
+/// let store = InMemoryTokenStore::default();
+/// let input = ResolveTokenInput {
+///     env_token: Some("env-token".to_string()),
+///     ..ResolveTokenInput::default()
+/// };
+///
+/// let resolved = resolve_access_token(&input, &config, &store)
+///     .unwrap()
+///     .unwrap();
+/// assert_eq!(resolved.token, "env-token");
+/// ```
 ///
 /// # Errors
 /// Returns config-related errors. Keychain read errors are ignored to allow

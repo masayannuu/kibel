@@ -66,6 +66,8 @@ Secondary external reference for behavior consistency:
   - `cargo run -p kibel-tools -- create-note-contract check`
   - `cargo run -p kibel-tools -- resource-contract check`
   - `cargo fmt --all --check`
-  - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace`
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  - `cargo test --workspace --all-features`
+  - `cargo test -p kibel-client --doc`
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
   - `cargo package --locked -p kibel-client`

@@ -230,8 +230,9 @@ All-resource contract:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo test -p kibel-client --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
