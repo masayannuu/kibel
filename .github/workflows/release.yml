@@ -184,18 +184,8 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -n "${HOMEBREW_TAP_REPO}" ] && [ -n "${HOMEBREW_TAP_TOKEN}" ]; then
-            default_branch="$(curl -fsSL \
-              -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${HOMEBREW_TAP_REPO}" \
-              | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p' \
-              | head -n 1)"
-            if [ -z "${default_branch}" ]; then
-              default_branch="main"
-            fi
             echo "enabled=true" >> "${GITHUB_OUTPUT}"
             echo "repo=${HOMEBREW_TAP_REPO}" >> "${GITHUB_OUTPUT}"
-            echo "branch=${default_branch}" >> "${GITHUB_OUTPUT}"
           else
             echo "enabled=false" >> "${GITHUB_OUTPUT}"
             echo "Homebrew tap sync skipped: HOMEBREW_TAP_REPO/HOMEBREW_TAP_TOKEN is not configured."
@@ -215,12 +205,26 @@ jobs:
 
       - name: Checkout Homebrew tap repository
         if: ${{ steps.tap_config.outputs.enabled == 'true' }}
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
-        with:
-          repository: ${{ steps.tap_config.outputs.repo }}
-          ref: ${{ steps.tap_config.outputs.branch }}
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: tap
+        env:
+          HOMEBREW_TAP_REPO: ${{ steps.tap_config.outputs.repo }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          remote_url="https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git"
+          selected_branch=""
+          for candidate in main master; do
+            if git ls-remote --exit-code --heads "${remote_url}" "${candidate}" >/dev/null 2>&1; then
+              selected_branch="${candidate}"
+              break
+            fi
+          done
+
+          if [ -z "${selected_branch}" ]; then
+            echo "failed to resolve tap branch (tried: main, master) for ${HOMEBREW_TAP_REPO}" >&2
+            exit 1
+          fi
+
+          git clone --depth 1 --branch "${selected_branch}" "${remote_url}" tap
 
       - name: Render Homebrew formula
         if: ${{ steps.tap_config.outputs.enabled == 'true' }}
