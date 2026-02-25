@@ -2,7 +2,7 @@
   "schema_contract_version": 1,
   "captured_at": "2026-02-23T06:21:53Z",
   "source": {
-    "origin": "https://example.kibe.la",
+    "origin": "https://example-team.kibe.la",
     "artifact": "artifacts/schema-live/create-note-schema-detail-20260223T062153Z.json"
   },
   "create_note_input_fields": [
