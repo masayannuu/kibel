@@ -1687,7 +1687,14 @@ fn resolve_login_token(
 }
 
 fn token_store_lookup_subjects(team: &str, origin: Option<&str>) -> Vec<String> {
-    vec![token_store_subject(team, origin)]
+    let mut subjects = Vec::new();
+    let origin_scoped = token_store_subject(team, origin);
+    subjects.push(origin_scoped);
+    let legacy = token_store_subject(team, None);
+    if !subjects.iter().any(|subject| subject == &legacy) {
+        subjects.push(legacy);
+    }
+    subjects
 }
 
 fn prompt_text_input(label: &str) -> Result<String, CliError> {
@@ -2094,8 +2101,17 @@ mod tests {
             token_store_lookup_subjects("example-team", Some("https://example-team.kibe.la"));
         assert_eq!(
             subjects,
-            vec!["origin::https://example-team.kibe.la::team::example-team".to_string()]
+            vec![
+                "origin::https://example-team.kibe.la::team::example-team".to_string(),
+                "example-team".to_string()
+            ]
         );
+    }
+
+    #[test]
+    fn token_store_lookup_subjects_returns_legacy_subject_without_origin() {
+        let subjects = token_store_lookup_subjects("example-team", None);
+        assert_eq!(subjects, vec!["example-team".to_string()]);
     }
 
     #[test]
