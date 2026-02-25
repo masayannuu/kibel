@@ -184,8 +184,18 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -n "${HOMEBREW_TAP_REPO}" ] && [ -n "${HOMEBREW_TAP_TOKEN}" ]; then
+            default_branch="$(curl -fsSL \
+              -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${HOMEBREW_TAP_REPO}" \
+              | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p' \
+              | head -n 1)"
+            if [ -z "${default_branch}" ]; then
+              default_branch="main"
+            fi
             echo "enabled=true" >> "${GITHUB_OUTPUT}"
             echo "repo=${HOMEBREW_TAP_REPO}" >> "${GITHUB_OUTPUT}"
+            echo "branch=${default_branch}" >> "${GITHUB_OUTPUT}"
           else
             echo "enabled=false" >> "${GITHUB_OUTPUT}"
             echo "Homebrew tap sync skipped: HOMEBREW_TAP_REPO/HOMEBREW_TAP_TOKEN is not configured."
@@ -208,6 +218,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
           repository: ${{ steps.tap_config.outputs.repo }}
+          ref: ${{ steps.tap_config.outputs.branch }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
