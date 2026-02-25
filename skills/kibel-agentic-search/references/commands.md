@@ -6,6 +6,12 @@
 kibel --json auth status
 ```
 
+If auth is not ready:
+
+```bash
+kibel --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+```
+
 ## Core retrieval
 
 Mine latest:
@@ -13,6 +19,8 @@ Mine latest:
 ```bash
 kibel --json search note --mine --first 10
 ```
+
+`--mine` is exclusive. Do not combine with `--query`, `--user-id`, `--group-id`, `--folder-id`.
 
 Broad recall:
 
@@ -30,6 +38,8 @@ kibel --json search note \
   --folder-id "<FOLDER_ID>" \
   --first 16
 ```
+
+`--user-id` is optional. If unknown, run precision narrowing without it and verify candidates with `note get`.
 
 ## Verification
 

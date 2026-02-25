@@ -2,6 +2,12 @@
 
 ## 1. Recall
 
+Pre-check auth. If not ready:
+
+```bash
+kibel --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+```
+
 Run broad search 2-3 times with different query terms:
 
 ```bash
@@ -26,6 +32,8 @@ kibel --json search note \
   --folder-id "<FOLDER_ID>" \
   --first 16
 ```
+
+If `<USER_ID>` is unknown, omit it and keep narrowing with group/folder filters.
 
 ## 3. Verification
 

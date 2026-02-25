@@ -28,10 +28,44 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   exit 127
 fi
 
-"${KBIN}" --json auth status
+AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+  echo "auth status command failed" >&2
+  exit 3
+}
+echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
 ```
 
 Proceed only if `ok: true`.
+
+If auth is not ready, recover with one of these before continuing:
+
+```bash
+# interactive (recommended for local)
+"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+
+# non-interactive token pipe (CI/temporary, `--with-token` reads stdin)
+printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
+  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+```
+
+Token issue page:
+
+```text
+https://<tenant>.kibe.la/settings/access_tokens
+```
+
+Tenant placeholder rule:
+
+- Kibela origin `https://<tenant>.kibe.la` の `<tenant>` を使う。
+- 例: `https://spikestudio.kibe.la` -> `team=spikestudio`
+
+Security note:
+
+- ローカル運用は interactive login を優先（keychain/config に保存）。
+- `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
 
 ## Core retrieval flows
 
@@ -64,7 +98,9 @@ Notes:
 
 - `--query` can be empty for filter-first retrieval.
 - if `--resource` is omitted, `NOTE` is used by default.
-- `--mine` is exclusive and cannot be combined with other search filters.
+- `--mine` is exclusive and cannot be combined with other search filters (`INPUT_INVALID`).
+- `--user-id` is optional. Do not block on unknown user IDs.
+- If user ID is unknown, first narrow by `--group-id`/`--folder-id`, then verify candidates via `note get` and use returned author metadata to infer the next filter.
 
 ## Verification step (optional but recommended)
 

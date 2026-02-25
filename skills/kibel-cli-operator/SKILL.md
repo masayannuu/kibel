@@ -23,11 +23,45 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   exit 127
 fi
 
-"${KBIN}" --json auth status
+AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+  echo "auth status command failed" >&2
+  exit 3
+}
+echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
 "${KBIN}" --help
 ```
 
 Proceed only when auth status returns `ok: true`.
+
+If auth is not ready:
+
+```bash
+# interactive
+"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+
+# non-interactive (CI/temporary, `--with-token` reads stdin)
+printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
+  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+```
+
+Token issue page:
+
+```text
+https://<tenant>.kibe.la/settings/access_tokens
+```
+
+Tenant placeholder rule:
+
+- Kibela origin `https://<tenant>.kibe.la` の `<tenant>` を使う。
+- 例: `https://spikestudio.kibe.la` -> `team=spikestudio`
+
+Security note:
+
+- ローカル運用は interactive login を優先（keychain/config に保存）。
+- `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
 
 ## Command family guidance
 
