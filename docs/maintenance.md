@@ -35,6 +35,13 @@
 
 1. `CHANGELOG.md` の Unreleased を更新する。
 2. 全チェックコマンドを実行して成功させる。
+   - `cargo fmt --all --check`
+   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+   - `cargo test --workspace --all-features`
+   - `cargo test -p kibel-client --doc`
+   - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+   - `cargo run -p kibel-tools -- create-note-contract check`
+   - `cargo run -p kibel-tools -- resource-contract check`
 3. package 検証を実行する。
    - `cargo package --locked -p kibel-client`
 4. `README.md` と `docs/` を実装に合わせて更新する。
@@ -63,3 +70,10 @@
   - `HOMEBREW_TAP_TOKEN` (contents:write on tap repo)
 - Formula renderer:
   - `scripts/render_homebrew_formula.sh`
+
+## Quality observation workflow
+
+- Workflow: `.github/workflows/quality-observe.yml`
+- Purpose:
+  - `cargo-nextest`, `cargo-deny`, `cargo-semver-checks` の観測を non-blocking で収集する。
+  - merge gate を壊さずに品質シグナルを継続監視する。

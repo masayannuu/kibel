@@ -1,0 +1,24 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  # Owner: kibel maintainers
+  # Tracking in security loop; remove when upstream fixes are available.
+  "RUSTSEC-2024-0388",
+  "RUSTSEC-2024-0384",
+]
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.93
