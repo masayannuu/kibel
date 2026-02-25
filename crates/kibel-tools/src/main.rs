@@ -789,111 +789,137 @@ fn parse_schema_types(payload: &Value) -> Result<HashMap<String, GraphqlTypeDefi
         .ok_or_else(|| "/data/__schema/types must be an array".to_string())?;
     let mut result = HashMap::new();
     for (index, item) in items.iter().enumerate() {
-        let context = format!("types[{index}]");
-        let object = item
-            .as_object()
-            .ok_or_else(|| format!("{context} must be object"))?;
-        let Some(name) = object
-            .get("name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let kind = object
-            .get("kind")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("UNKNOWN")
-            .to_string();
-        let mut fields = Vec::new();
-        if let Some(field_items) = object.get("fields").and_then(Value::as_array) {
-            for (field_index, field_item) in field_items.iter().enumerate() {
-                let field_context = format!("{context}.fields[{field_index}]");
-                let field_object = field_item
-                    .as_object()
-                    .ok_or_else(|| format!("{field_context} must be object"))?;
-                let field_name = get_trimmed_string(field_object, "name", &field_context)?;
-                let field_type = parse_graphql_type_ref(
-                    field_object
-                        .get("type")
-                        .ok_or_else(|| format!("{field_context} missing type"))?,
-                    &format!("{field_context}.type"),
-                )?;
-                let mut field_args = Vec::new();
-                let args = field_object
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map(|value| value.as_slice())
-                    .unwrap_or(&[]);
-                for (arg_index, arg_item) in args.iter().enumerate() {
-                    let arg_context = format!("{field_context}.args[{arg_index}]");
-                    let arg_object = arg_item
-                        .as_object()
-                        .ok_or_else(|| format!("{arg_context} must be object"))?;
-                    let arg_name = get_trimmed_string(arg_object, "name", &arg_context)?;
-                    let required = arg_is_required(arg_object, &arg_context)?;
-                    let arg_type = parse_graphql_type_ref(
-                        arg_object
-                            .get("type")
-                            .ok_or_else(|| format!("{arg_context} missing type"))?,
-                        &format!("{arg_context}.type"),
-                    )?;
-                    let rendered_type = render_graphql_type_ref(&arg_type);
-                    field_args.push(GraphqlArg {
-                        name: arg_name,
-                        required,
-                        type_ref: arg_type,
-                        rendered_type,
-                    });
-                }
-                fields.push(GraphqlFieldDefinition {
-                    name: field_name,
-                    args: field_args,
-                    type_ref: field_type,
-                });
-            }
+        if let Some((name, definition)) = parse_schema_type_entry(item, &format!("types[{index}]"))?
+        {
+            result.insert(name, definition);
         }
-        let possible_types = object
-            .get("possibleTypes")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.get("name").and_then(Value::as_str))
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let enum_values = object
-            .get("enumValues")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.get("name").and_then(Value::as_str))
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        result.insert(
-            name.to_string(),
-            GraphqlTypeDefinition {
-                kind,
-                fields,
-                possible_types,
-                enum_values,
-            },
-        );
     }
     Ok(result)
+}
+
+fn parse_schema_type_entry(
+    item: &Value,
+    context: &str,
+) -> Result<Option<(String, GraphqlTypeDefinition)>, String> {
+    let object = item
+        .as_object()
+        .ok_or_else(|| format!("{context} must be object"))?;
+    let Some(name) = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("UNKNOWN")
+        .to_string();
+    let fields = parse_schema_field_definitions(object, context)?;
+    let possible_types = collect_named_members(object, "possibleTypes");
+    let enum_values = collect_named_members(object, "enumValues");
+    Ok(Some((
+        name.to_string(),
+        GraphqlTypeDefinition {
+            kind,
+            fields,
+            possible_types,
+            enum_values,
+        },
+    )))
+}
+
+fn parse_schema_field_definitions(
+    object: &serde_json::Map<String, Value>,
+    context: &str,
+) -> Result<Vec<GraphqlFieldDefinition>, String> {
+    let Some(field_items) = object.get("fields").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut fields = Vec::new();
+    for (field_index, field_item) in field_items.iter().enumerate() {
+        fields.push(parse_schema_field_definition(
+            field_item,
+            &format!("{context}.fields[{field_index}]"),
+        )?);
+    }
+    Ok(fields)
+}
+
+fn parse_schema_field_definition(
+    field_item: &Value,
+    context: &str,
+) -> Result<GraphqlFieldDefinition, String> {
+    let field_object = field_item
+        .as_object()
+        .ok_or_else(|| format!("{context} must be object"))?;
+    let field_name = get_trimmed_string(field_object, "name", context)?;
+    let field_type = parse_graphql_type_ref(
+        field_object
+            .get("type")
+            .ok_or_else(|| format!("{context} missing type"))?,
+        &format!("{context}.type"),
+    )?;
+    let field_args = parse_schema_field_args(field_object, context)?;
+    Ok(GraphqlFieldDefinition {
+        name: field_name,
+        args: field_args,
+        type_ref: field_type,
+    })
+}
+
+fn parse_schema_field_args(
+    field_object: &serde_json::Map<String, Value>,
+    context: &str,
+) -> Result<Vec<GraphqlArg>, String> {
+    let args = field_object
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|value| value.as_slice())
+        .unwrap_or(&[]);
+    let mut parsed_args = Vec::new();
+    for (arg_index, arg_item) in args.iter().enumerate() {
+        let arg_context = format!("{context}.args[{arg_index}]");
+        let arg_object = arg_item
+            .as_object()
+            .ok_or_else(|| format!("{arg_context} must be object"))?;
+        let arg_name = get_trimmed_string(arg_object, "name", &arg_context)?;
+        let required = arg_is_required(arg_object, &arg_context)?;
+        let arg_type = parse_graphql_type_ref(
+            arg_object
+                .get("type")
+                .ok_or_else(|| format!("{arg_context} missing type"))?,
+            &format!("{arg_context}.type"),
+        )?;
+        let rendered_type = render_graphql_type_ref(&arg_type);
+        parsed_args.push(GraphqlArg {
+            name: arg_name,
+            required,
+            type_ref: arg_type,
+            rendered_type,
+        });
+    }
+    Ok(parsed_args)
+}
+
+fn collect_named_members(object: &serde_json::Map<String, Value>, key: &str) -> Vec<String> {
+    object
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("name").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn resolve_named_type(type_ref: &GraphqlTypeRef) -> Option<&str> {
@@ -1631,107 +1657,155 @@ fn parse_endpoint_snapshot(
     let object = payload
         .as_object()
         .ok_or_else(|| "endpoint snapshot must be an object".to_string())?;
+    let resources_array = endpoint_snapshot_resources_array(object)?;
+    let resources = parse_endpoint_resources(resources_array, fallback_mode)?;
+    validate_endpoint_resource_coverage(&resources)?;
+    Ok(EndpointSnapshot {
+        captured_at: endpoint_snapshot_meta_value(object, "captured_at"),
+        origin: endpoint_snapshot_meta_value(object, "origin"),
+        endpoint: endpoint_snapshot_meta_value(object, "endpoint"),
+        resources,
+    })
+}
+
+fn endpoint_snapshot_resources_array(
+    object: &serde_json::Map<String, Value>,
+) -> Result<&[Value], String> {
     let resources_value = object
         .get("resources")
         .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())?;
-    let resources_array = resources_value
+    resources_value
         .as_array()
-        .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())?;
+        .map(Vec::as_slice)
+        .ok_or_else(|| "endpoint snapshot must contain array `resources`".to_string())
+}
 
+fn parse_endpoint_resources(
+    resources_array: &[Value],
+    fallback_mode: DocumentFallbackMode,
+) -> Result<HashMap<String, EndpointResource>, String> {
     let mut resources = HashMap::new();
     for (index, item) in resources_array.iter().enumerate() {
-        let context = format!("resources[{index}]");
-        let object = item
-            .as_object()
-            .ok_or_else(|| format!("{context} must be an object"))?;
-
-        let name = get_trimmed_string(object, "name", &context)?;
-        if name.is_empty() {
-            return Err(format!("{context} has empty name"));
-        }
-        if resources.contains_key(&name) {
+        let resource = parse_endpoint_resource(item, index, fallback_mode)?;
+        if resources.contains_key(&resource.name) {
             return Err(format!(
-                "duplicate resource name in endpoint snapshot: {name}"
+                "duplicate resource name in endpoint snapshot: {}",
+                resource.name
             ));
         }
+        resources.insert(resource.name.clone(), resource);
+    }
+    Ok(resources)
+}
 
-        let kind = get_trimmed_string(object, "kind", &context)?;
-        if kind != "query" && kind != "mutation" {
-            return Err(format!("resource `{name}` has invalid kind: {kind}"));
-        }
-        let field = get_trimmed_string(object, "field", &context)?;
-        let operation = get_trimmed_string(object, "operation", &context)?;
-        let client_method = get_trimmed_string(object, "client_method", &context)?;
-        if field.is_empty() || operation.is_empty() || client_method.is_empty() {
-            return Err(format!(
-                "resource `{name}` must have non-empty field/operation/client_method"
-            ));
-        }
+fn parse_endpoint_resource(
+    item: &Value,
+    index: usize,
+    fallback_mode: DocumentFallbackMode,
+) -> Result<EndpointResource, String> {
+    let context = format!("resources[{index}]");
+    let object = item
+        .as_object()
+        .ok_or_else(|| format!("{context} must be an object"))?;
 
-        let all_variables = normalize_string_list(
-            object
-                .get("all_variables")
-                .ok_or_else(|| format!("{context} missing `all_variables`"))?,
-            &format!("{context}.all_variables"),
-        )?;
-        let required_variables = normalize_string_list(
-            object
-                .get("required_variables")
-                .ok_or_else(|| format!("{context} missing `required_variables`"))?,
-            &format!("{context}.required_variables"),
-        )?;
-        let document = object
-            .get("document")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                if fallback_mode.allow_legacy() {
-                    legacy_operation_document(&name).map(str::to_string)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                if fallback_mode.allow_legacy() {
-                    format!(
-                        "resource `{name}` missing `document` and no breakglass template is available"
-                    )
-                } else {
-                    format!(
-                        "resource `{name}` missing `document` (strict mode). re-run refresh/write or use --document-fallback-mode breakglass temporarily"
-                    )
-                }
-            })?;
-
-        let all_set = all_variables.iter().collect::<HashSet<_>>();
-        let missing_required = required_variables
-            .iter()
-            .filter(|value| !all_set.contains(*value))
-            .cloned()
-            .collect::<Vec<_>>();
-        if !missing_required.is_empty() {
-            return Err(format!(
-                "resource `{name}` has required vars not in all_variables: {missing_required:?}"
-            ));
-        }
-
-        resources.insert(
-            name.clone(),
-            EndpointResource {
-                name,
-                kind,
-                field,
-                operation,
-                client_method,
-                all_variables,
-                required_variables,
-                document,
-            },
-        );
+    let name = get_trimmed_string(object, "name", &context)?;
+    if name.is_empty() {
+        return Err(format!("{context} has empty name"));
     }
 
+    let kind = get_trimmed_string(object, "kind", &context)?;
+    if kind != "query" && kind != "mutation" {
+        return Err(format!("resource `{name}` has invalid kind: {kind}"));
+    }
+    let field = get_trimmed_string(object, "field", &context)?;
+    let operation = get_trimmed_string(object, "operation", &context)?;
+    let client_method = get_trimmed_string(object, "client_method", &context)?;
+    if field.is_empty() || operation.is_empty() || client_method.is_empty() {
+        return Err(format!(
+            "resource `{name}` must have non-empty field/operation/client_method"
+        ));
+    }
+
+    let all_variables = normalize_string_list(
+        object
+            .get("all_variables")
+            .ok_or_else(|| format!("{context} missing `all_variables`"))?,
+        &format!("{context}.all_variables"),
+    )?;
+    let required_variables = normalize_string_list(
+        object
+            .get("required_variables")
+            .ok_or_else(|| format!("{context} missing `required_variables`"))?,
+        &format!("{context}.required_variables"),
+    )?;
+    validate_required_subset(&name, &all_variables, &required_variables)?;
+
+    let document = parse_endpoint_resource_document(object, &name, fallback_mode)?;
+    Ok(EndpointResource {
+        name,
+        kind,
+        field,
+        operation,
+        client_method,
+        all_variables,
+        required_variables,
+        document,
+    })
+}
+
+fn validate_required_subset(
+    resource_name: &str,
+    all_variables: &[String],
+    required_variables: &[String],
+) -> Result<(), String> {
+    let all_set = all_variables.iter().collect::<HashSet<_>>();
+    let missing_required = required_variables
+        .iter()
+        .filter(|value| !all_set.contains(*value))
+        .cloned()
+        .collect::<Vec<_>>();
+    if missing_required.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "resource `{resource_name}` has required vars not in all_variables: {missing_required:?}"
+    ))
+}
+
+fn parse_endpoint_resource_document(
+    object: &serde_json::Map<String, Value>,
+    resource_name: &str,
+    fallback_mode: DocumentFallbackMode,
+) -> Result<String, String> {
+    object
+        .get("document")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            if fallback_mode.allow_legacy() {
+                legacy_operation_document(resource_name).map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            if fallback_mode.allow_legacy() {
+                format!(
+                    "resource `{resource_name}` missing `document` and no breakglass template is available"
+                )
+            } else {
+                format!(
+                    "resource `{resource_name}` missing `document` (strict mode). re-run refresh/write or use --document-fallback-mode breakglass temporarily"
+                )
+            }
+        })
+}
+
+fn validate_endpoint_resource_coverage(
+    resources: &HashMap<String, EndpointResource>,
+) -> Result<(), String> {
     let missing = resource_definitions()
         .iter()
         .filter(|definition| !resources.contains_key(definition.name))
@@ -1750,28 +1824,17 @@ fn parse_endpoint_snapshot(
         .filter(|name| !expected.contains(name.as_str()))
         .cloned()
         .collect::<Vec<_>>();
-    if !unexpected.is_empty() {
-        return Err("endpoint snapshot contains unknown resources. \
-             update RESOURCE_ORDER/CLI/client/tests first: "
-            .to_string()
-            + &format!("{unexpected:?}"));
+    if unexpected.is_empty() {
+        return Ok(());
     }
+    Err("endpoint snapshot contains unknown resources. \
+         update RESOURCE_ORDER/CLI/client/tests first: "
+        .to_string()
+        + &format!("{unexpected:?}"))
+}
 
-    Ok(EndpointSnapshot {
-        captured_at: object
-            .get("captured_at")
-            .map(value_to_string)
-            .unwrap_or_default(),
-        origin: object
-            .get("origin")
-            .map(value_to_string)
-            .unwrap_or_default(),
-        endpoint: object
-            .get("endpoint")
-            .map(value_to_string)
-            .unwrap_or_default(),
-        resources,
-    })
+fn endpoint_snapshot_meta_value(object: &serde_json::Map<String, Value>, key: &str) -> String {
+    object.get(key).map(value_to_string).unwrap_or_default()
 }
 
 fn build_resource_snapshot_value(
@@ -2402,447 +2465,4 @@ fn run_resource_contract_diff(root: &Path, args: &ResourceContractDiffArgs) -> R
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn resource(name: &str, all_variables: &[&str], required_variables: &[&str]) -> Value {
-        json!({
-            "name": name,
-            "kind": "query",
-            "operation": name,
-            "all_variables": all_variables,
-            "required_variables": required_variables,
-            "graphql_file": format!("endpoint:query.{name}"),
-            "client_method": name,
-            "document": format!("query {name} {{ {name} }}"),
-        })
-    }
-
-    #[test]
-    fn normalize_string_list_trims_and_deduplicates() {
-        let normalized =
-            normalize_string_list(&json!([" title ", "", "title", 5, "5", "  "]), "test")
-                .expect("normalize_string_list should succeed");
-
-        assert_eq!(normalized, vec!["title".to_string(), "5".to_string()]);
-    }
-
-    #[test]
-    fn normalize_resource_snapshot_sorts_by_resource_name() {
-        let payload = json!({
-            "schema_contract_version": 1,
-            "source": {
-                "mode": "endpoint_introspection_snapshot",
-                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
-                "captured_at": "2026-02-23T00:00:00Z",
-                "origin": "https://example.kibe.la",
-                "endpoint": "https://example.kibe.la/api/v1",
-                "upstream_commit": "",
-            },
-            "resources": [
-                resource("searchNote", &["query"], &["query"]),
-                resource("attachNoteToFolder", &["id"], &["id"]),
-            ]
-        });
-
-        let normalized = normalize_resource_snapshot(&payload).expect("snapshot must normalize");
-        let names = normalized
-            .resources
-            .iter()
-            .map(|item| item.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["attachNoteToFolder", "searchNote"]);
-    }
-
-    #[test]
-    fn normalize_resource_snapshot_rejects_required_variables_outside_all_variables() {
-        let payload = json!({
-            "schema_contract_version": 1,
-            "source": {
-                "mode": "endpoint_introspection_snapshot",
-                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
-                "captured_at": "2026-02-23T00:00:00Z",
-                "origin": "https://example.kibe.la",
-                "endpoint": "https://example.kibe.la/api/v1",
-                "upstream_commit": "",
-            },
-            "resources": [
-                resource("searchNote", &["query"], &["query", "groupId"]),
-            ]
-        });
-
-        let error =
-            normalize_resource_snapshot(&payload).expect_err("invalid required vars must fail");
-        assert!(
-            error.contains("required vars not in all_variables"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn build_endpoint_snapshot_from_introspection_extracts_required_args() {
-        let payload = json!({
-            "data": {
-                "__schema": {
-                    "queryType": {
-                        "fields": [
-                            {
-                                "name": "search",
-                                "args": [
-                                    {
-                                        "name": "query",
-                                        "defaultValue": null,
-                                        "type": {
-                                            "kind": "NON_NULL",
-                                            "name": null,
-                                            "ofType": {
-                                                "kind": "SCALAR",
-                                                "name": "String",
-                                                "ofType": null
-                                            }
-                                        }
-                                    },
-                                    {
-                                        "name": "first",
-                                        "defaultValue": "16",
-                                        "type": {
-                                            "kind": "SCALAR",
-                                            "name": "Int",
-                                            "ofType": null
-                                        }
-                                    }
-                                ],
-                                "type": {
-                                    "kind": "OBJECT",
-                                    "name": "SearchConnection",
-                                    "ofType": null
-                                }
-                            }
-                        ]
-                    },
-                    "mutationType": {
-                        "fields": [
-                            {
-                                "name": "createNote",
-                                "args": [
-                                    {
-                                        "name": "input",
-                                        "defaultValue": null,
-                                        "type": {
-                                            "kind": "NON_NULL",
-                                            "name": null,
-                                            "ofType": {
-                                                "kind": "INPUT_OBJECT",
-                                                "name": "CreateNoteInput",
-                                                "ofType": null
-                                            }
-                                        }
-                                    }
-                                ],
-                                "type": {
-                                    "kind": "OBJECT",
-                                    "name": "CreateNotePayload",
-                                    "ofType": null
-                                }
-                            }
-                        ]
-                    },
-                    "types": [
-                        {
-                            "name": "CreateNoteInput",
-                            "inputFields": [
-                                { "name": "title" },
-                                { "name": "content" },
-                                { "name": "groupIds" },
-                                { "name": "coediting" },
-                                { "name": "draft" }
-                            ]
-                        },
-                        {
-                            "name": "CreateNotePayload",
-                            "fields": [
-                                {
-                                    "name": "note",
-                                    "args": [],
-                                    "type": { "kind": "OBJECT", "name": "Note", "ofType": null }
-                                },
-                                {
-                                    "name": "clientMutationId",
-                                    "args": [],
-                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
-                                }
-                            ]
-                        },
-                        {
-                            "name": "Note",
-                            "fields": [
-                                {
-                                    "name": "id",
-                                    "args": [],
-                                    "type": { "kind": "SCALAR", "name": "ID", "ofType": null }
-                                },
-                                {
-                                    "name": "title",
-                                    "args": [],
-                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
-                                }
-                            ]
-                        }
-                    ]
-                }
-            }
-        });
-        let definitions = vec![
-            ResourceDefinition {
-                name: "searchNote",
-                kind: "query",
-                field: "search",
-                client_method: "search_note",
-            },
-            ResourceDefinition {
-                name: "createNote",
-                kind: "mutation",
-                field: "createNote",
-                client_method: "create_note",
-            },
-        ];
-
-        let snapshot = build_endpoint_snapshot_from_introspection(
-            &definitions,
-            &payload,
-            "https://example.kibe.la",
-            "https://example.kibe.la/api/v1",
-            "2026-02-24T00:00:00Z",
-            DocumentFallbackMode::Breakglass,
-        )
-        .expect("snapshot must build");
-        let resources = snapshot
-            .get("resources")
-            .and_then(Value::as_array)
-            .expect("resources should be array");
-        let search = resources
-            .iter()
-            .find(|item| item.get("name").and_then(Value::as_str) == Some("searchNote"))
-            .expect("searchNote should exist");
-        let required = search
-            .get("required_variables")
-            .and_then(Value::as_array)
-            .expect("required_variables should be array");
-        assert_eq!(required, &vec![Value::String("query".to_string())]);
-        assert!(
-            search
-                .get("document")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.contains("query SearchNote")),
-            "generated snapshot should include document"
-        );
-    }
-
-    fn endpoint_resource_json(definition: &ResourceDefinition, with_document: bool) -> Value {
-        let mut object = serde_json::Map::new();
-        object.insert(
-            "name".to_string(),
-            Value::String(definition.name.to_string()),
-        );
-        object.insert(
-            "kind".to_string(),
-            Value::String(definition.kind.to_string()),
-        );
-        object.insert(
-            "field".to_string(),
-            Value::String(definition.field.to_string()),
-        );
-        object.insert(
-            "operation".to_string(),
-            Value::String(to_pascal_case(definition.name)),
-        );
-        object.insert(
-            "client_method".to_string(),
-            Value::String(definition.client_method.to_string()),
-        );
-        object.insert("all_variables".to_string(), Value::Array(Vec::new()));
-        object.insert("required_variables".to_string(), Value::Array(Vec::new()));
-        if with_document {
-            object.insert(
-                "document".to_string(),
-                Value::String(format!(
-                    "query {} {{ {} }}",
-                    to_pascal_case(definition.name),
-                    definition.field
-                )),
-            );
-        }
-        Value::Object(object)
-    }
-
-    #[test]
-    fn parse_endpoint_snapshot_strict_rejects_missing_document() {
-        let resources = resource_definitions()
-            .iter()
-            .map(|definition| endpoint_resource_json(definition, false))
-            .collect::<Vec<_>>();
-        let payload = json!({
-            "captured_at": "2026-02-25T00:00:00Z",
-            "origin": "https://example.kibe.la",
-            "endpoint": "https://example.kibe.la/api/v1",
-            "resources": resources,
-        });
-
-        let error = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Strict)
-            .expect_err("strict mode should reject missing document");
-        assert!(error.contains("strict mode"), "unexpected error: {error}");
-    }
-
-    #[test]
-    fn parse_endpoint_snapshot_breakglass_accepts_missing_document() {
-        let resources = resource_definitions()
-            .iter()
-            .map(|definition| endpoint_resource_json(definition, false))
-            .collect::<Vec<_>>();
-        let payload = json!({
-            "captured_at": "2026-02-25T00:00:00Z",
-            "origin": "https://example.kibe.la",
-            "endpoint": "https://example.kibe.la/api/v1",
-            "resources": resources,
-        });
-
-        let snapshot = parse_endpoint_snapshot(&payload, DocumentFallbackMode::Breakglass)
-            .expect("breakglass mode should allow fallback templates");
-        assert_eq!(snapshot.resources.len(), resource_definitions().len());
-    }
-
-    #[test]
-    fn build_create_note_schema_from_endpoint_introspection_extracts_fields() {
-        let payload = json!({
-            "data": {
-                "__schema": {
-                    "types": [
-                        {
-                            "name": "CreateNoteInput",
-                            "inputFields": [
-                                { "name": "title" },
-                                { "name": "content" },
-                                { "name": "groupIds" },
-                                { "name": "coediting" },
-                                { "name": "draft" }
-                            ]
-                        },
-                        {
-                            "name": "CreateNotePayload",
-                            "fields": [
-                                { "name": "note" },
-                                { "name": "clientMutationId" }
-                            ]
-                        },
-                        {
-                            "name": "Note",
-                            "fields": [
-                                { "name": "id" },
-                                { "name": "title" }
-                            ]
-                        }
-                    ]
-                }
-            }
-        });
-
-        let schema = build_create_note_schema_from_endpoint_introspection(&payload)
-            .expect("schema should parse");
-        assert!(schema.input.iter().any(|field| field == "title"));
-        assert!(schema.payload.iter().any(|field| field == "note"));
-        assert!(schema.note_projection.iter().any(|field| field == "id"));
-    }
-
-    #[test]
-    fn build_create_note_snapshot_from_endpoint_snapshot_extracts_fields() {
-        let payload = json!({
-            "captured_at": "2026-02-25T00:00:00Z",
-            "origin": "https://example.kibe.la",
-            "endpoint": "https://example.kibe.la/api/v1",
-            "create_note_schema": {
-                "input_fields": ["title", "content", "groupIds", "coediting", "draft"],
-                "payload_fields": ["note", "clientMutationId"],
-                "note_projection_fields": ["id", "title"],
-            }
-        });
-        let snapshot = build_create_note_snapshot_from_endpoint_snapshot(&payload)
-            .expect("snapshot should build");
-        assert_eq!(
-            snapshot
-                .pointer("/create_note_payload_fields/0")
-                .and_then(Value::as_str),
-            Some("note")
-        );
-    }
-
-    #[test]
-    fn compute_resource_contract_diff_detects_breaking_changes() {
-        let base_payload = json!({
-            "schema_contract_version": 1,
-            "source": {
-                "mode": "endpoint_introspection_snapshot",
-                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
-                "captured_at": "2026-02-23T00:00:00Z",
-                "origin": "https://example.kibe.la",
-                "endpoint": "https://example.kibe.la/api/v1",
-                "upstream_commit": "",
-            },
-            "resources": [{
-                "name": "searchNote",
-                "kind": "query",
-                "operation": "SearchNote",
-                "all_variables": ["query", "first"],
-                "required_variables": ["query"],
-                "graphql_file": "endpoint:query.search",
-                "client_method": "search_note",
-                "document": "query SearchNote($query: String!) { search(query: $query) { __typename } }"
-            }]
-        });
-        let target_payload = json!({
-            "schema_contract_version": 1,
-            "source": {
-                "mode": "endpoint_introspection_snapshot",
-                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
-                "captured_at": "2026-02-24T00:00:00Z",
-                "origin": "https://example.kibe.la",
-                "endpoint": "https://example.kibe.la/api/v1",
-                "upstream_commit": "",
-            },
-            "resources": [{
-                "name": "searchNote",
-                "kind": "mutation",
-                "operation": "SearchNote",
-                "all_variables": ["query", "first"],
-                "required_variables": [],
-                "graphql_file": "endpoint:mutation.searchFolder",
-                "client_method": "search_note",
-                "document": "mutation SearchNote($query: String!) { searchFolder(query: $query) { __typename } }"
-            }]
-        });
-        let base = normalize_resource_snapshot(&base_payload).expect("base should parse");
-        let target = normalize_resource_snapshot(&target_payload).expect("target should parse");
-        let diff = compute_resource_contract_diff(&base, &target);
-        assert!(
-            diff.breaking
-                .iter()
-                .any(|item| item.contains("kind changed")),
-            "expected kind change in diff: {:?}",
-            diff.breaking
-        );
-        assert!(
-            diff.breaking
-                .iter()
-                .any(|item| item.contains("root field changed")),
-            "expected root field change in diff: {:?}",
-            diff.breaking
-        );
-        assert!(
-            diff.breaking
-                .iter()
-                .any(|item| item.contains("required variable(s) removed")),
-            "expected required variable removal in diff: {:?}",
-            diff.breaking
-        );
-    }
-}
+mod tests;
