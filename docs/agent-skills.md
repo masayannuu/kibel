@@ -24,7 +24,19 @@ Provide official agent workflows so Codex/Claude Code can use `kibel` immediatel
 
 ## Codex Installation (GitHub path)
 
-If Codex `skill-installer` is available:
+Recommended:
+
+```bash
+./scripts/install_kibel_skills.sh
+```
+
+Pinned install for reproducibility:
+
+```bash
+./scripts/install_kibel_skills.sh --ref v0.2.6
+```
+
+Fallback (direct skill-installer):
 
 ```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
