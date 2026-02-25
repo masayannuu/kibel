@@ -165,6 +165,7 @@ jobs:
           generate_release_notes: true
 
       - name: Attest release artifacts provenance
+        if: ${{ github.event.repository.private == false }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
