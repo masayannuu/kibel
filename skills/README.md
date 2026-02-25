@@ -45,12 +45,9 @@ Open each `SKILL.md` and execute the workflow as-is:
 
 - Official skills target distributed binaries: `kibel` must be available in `PATH`.
 - If your environment uses a custom install location, set `KIBEL_BIN=/absolute/path/to/kibel`.
-- Python runtime (`python3`) is required for skill-side JSON checks and evaluation scripts.
+- Python runtime (`python3`) is required for skill-side JSON checks.
 - `jq` is not required by official read-only skills.
 
 ## References
 
 - `docs/agentic-rag-architecture.md`
-- `docs/agentic-rag-evaluation-2026-02-25.md`
-- `docs/agentic-rag-evaluation-protocol.md`
-- `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`

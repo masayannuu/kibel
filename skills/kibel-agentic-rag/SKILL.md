@@ -147,10 +147,10 @@ Ranking priority:
 ## Retrieval pipeline (Agentic RAG v2)
 
 1. `ambiguity_planner`: normalize + decompose + generate candidate queries.
-2. `route_select`: classify question as `direct / multi_hop / global`.
+2. `route_select`: classify question as `procedure / direct / multi_hop / global`.
 3. `seed_recall`: run broad query with profile-specific `first`.
 4. `frontier_expand`: generate 1-2 follow-up queries from top hits.
-5. `evidence_pull`: fetch full notes only for selected candidates.
+5. `evidence_pull`: fetch full notes only for selected candidates (query-signal coverage first).
 6. `corrective_loop`: if evidence is weak, re-search with rewritten query.
 7. `verification`: run CoVe-style claim checks before final answer.
 8. `finalize`: answer + evidence + unknowns.
@@ -226,6 +226,14 @@ Rules:
 Then inspect returned note metadata (`note get`) to pin the correct author ID.
 - `--mine` is for self-latest only; do not combine it with other search filters.
 
+Signal-based rerank rule (generic):
+
+- Build signal terms from candidate queries and required evidence keywords.
+- Prefer notes that satisfy at least one signal set with 2+ meaningful terms.
+- Treat single-term generic matches (for example only `token`) as weak evidence.
+- For procedure route, favor notes that include both signal matches and procedural markers.
+- For auth-like procedure queries (`auth/login/token/認証/ログイン`), require compound intent evidence (single-token match is insufficient).
+
 ### Pass 3: Verification
 
 Fetch full note bodies for top candidates:
@@ -246,6 +254,13 @@ CoVe-style minimum rule:
 - 主張ごとに「裏取り質問」を1つ作る。
 - 裏取り質問ごとに最低1件 `note get` で本文確認する。
 - 裏取りできない主張は `Unknowns` に落とす。
+
+Procedure-route verification rule:
+
+- If the question is procedural (`手順/方法/how-to`), evidence should include:
+  - query-signal coverage (at least one strong query signal match), and
+  - procedural markers in body (ordered list, command flags, or code block).
+- If either is missing, keep the claim as unresolved and continue corrective loop.
 
 Japanese-first verification rule:
 
@@ -298,6 +313,7 @@ Unknowns:
 - If retrieval has zero relevant hits, report no-evidence explicitly.
 - If evidence conflicts, show both sources and mark unresolved.
 - Never fabricate citations or note content.
+- Evaluation/judgement must check note content (`note get` / `note get-from-path`), not title-only.
 
 ## References and templates
 
@@ -305,9 +321,9 @@ Unknowns:
 - `templates/evidence_answer_template.md`: final response template.
 - `templates/profile_scorecard.md`: profile A/B evaluation sheet.
 - `templates/ambiguity_planner_card.md`: ambiguity decomposition worksheet.
-- `eval/dataset_v1.json`: reproducible question set (`>=20` cases).
-- `eval/run_eval_v1.js`: baseline/planner/planner+corrective evaluation runner.
-- `eval/score_human_labels_v1.js`: judge-filled `human_labels.csv` aggregator.
-- `eval/gate_eval_v1.js`: retrieval/promotion gate checker.
 - `docs/agentic-rag-architecture.md`: architecture and KPI-based evaluation.
-- `docs/agentic-rag-evaluation-protocol.md`: evaluation contract and gates.
+
+Evaluation policy:
+
+- This OSS skill does not bundle evaluation datasets or evaluation harness scripts.
+- If needed, run evaluation in your own private environment with tenant-safe data.

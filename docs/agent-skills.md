@@ -62,12 +62,9 @@ Treat each `SKILL.md` as an execution playbook and keep commands unchanged.
 
 ## Agentic RAG Architecture
 
-詳細設計と評価指標は以下を参照:
+詳細設計は以下を参照:
 
 - `docs/agentic-rag-architecture.md`
-- `docs/agentic-rag-evaluation-2026-02-25.md`
-- `docs/agentic-rag-evaluation-protocol.md`
-- `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`
 
 ## Guardrails
 

@@ -59,8 +59,8 @@ Avoid fixed static synonym dictionaries as the primary strategy. Use ambiguity f
 ## Ranking and Stop Conditions
 
 Ranking signal:
-1. クエリ語一致（title/contentSummaryHtml）
-2. 更新日時（`updatedAt`）
+1. RRF-based multi-query rank fusion（`rrf(k=60)`）
+2. クエリ語一致（title/contentSummaryHtml）
 3. 範囲一致（group/folder/user filters）
 4. 既取得証拠との差分（novelty）
 
@@ -89,7 +89,7 @@ Stop条件:
 - `citation_precision`: 提示引用のうち実際に主張を支持した割合
 - `unknowns_rate`: 必要時に unknown を明示できた割合
 - `avg_cli_calls`: 1問あたりCLI呼び出し平均
-- `p95_latency_sec`: 95パーセンタイル応答時間
+- `p95_latency_ms`: 95パーセンタイル応答時間（ms）
 - `top5_relevance`: 上位5件の人間評価適合率
 - `top10_relevance`: 上位10件の人間評価適合率
 - `corrective_trigger_rate`: corrective loop が発火した割合
@@ -104,12 +104,12 @@ Stop条件:
 5. 採用基準:
    - `balanced` が `answer_supported_rate >= 0.90`
    - `citation_precision >= 0.95`
-   - `p95_latency_sec` が許容値内（運用SLOに合わせる）
+   - `p95_latency_ms` が許容値内（運用SLOに合わせる）
 
 Reproducible protocol:
 
-- `docs/agentic-rag-evaluation-protocol.md`
-- Latest run example: `docs/agentic-rag-evaluation-v1-balanced-2026-02-25.md`
+- Use your own private dataset and evaluation harness in your environment.
+- Keep public OSS repository free of tenant-specific evaluation artifacts.
 
 ## Recommended Default
 

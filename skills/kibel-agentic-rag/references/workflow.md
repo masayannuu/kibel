@@ -49,7 +49,12 @@ Pre-check auth. If not ready:
 kibel auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 ```
 
-Classify question: `direct / multi_hop / global`.
+Classify question: `procedure / direct / multi_hop / global`.
+
+- `procedure`: 手順・方法・設定系 (`手順`, `方法`, `how-to`, `login/setup/export` など)
+- `multi_hop`: 比較・依存・原因分析
+- `global`: 全社/横断要約
+- `direct`: 単一事実確認
 
 ## 3. seed_recall
 
@@ -132,6 +137,20 @@ or
 ```bash
 kibel note get-from-path --path "/notes/<number>"
 ```
+
+Signal coverage rule:
+
+- Build signal terms from planner/corrective queries and required evidence keywords.
+- Prefer notes with at least one strong signal-set match (2+ meaningful terms).
+- Avoid promoting notes that only match one weak generic term.
+- For auth/login procedures, require compound intent terms (for example auth+login) before accepting evidence.
+
+Procedure verification rule:
+
+- For `procedure` route, final evidence should satisfy both:
+  1. strong signal-set match
+  2. procedural marker in note body (ordered list, command flags, code block)
+- If one is missing, keep the claim unresolved and trigger corrective search.
 
 ## 6. corrective_loop
 
