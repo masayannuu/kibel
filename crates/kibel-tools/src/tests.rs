@@ -413,7 +413,7 @@ fn compute_resource_contract_diff_detects_breaking_changes() {
             "kind": "mutation",
             "operation": "SearchNote",
             "all_variables": ["query", "first"],
-            "required_variables": [],
+            "required_variables": ["query", "first"],
             "graphql_file": "endpoint:mutation.searchFolder",
             "client_method": "search_note",
             "document": "mutation SearchNote($query: String!) { searchFolder(query: $query) { __typename } }"
@@ -439,8 +439,64 @@ fn compute_resource_contract_diff_detects_breaking_changes() {
     assert!(
         diff.breaking
             .iter()
-            .any(|item| item.contains("required variable(s) removed")),
-        "expected required variable removal in diff: {:?}",
+            .any(|item| item.contains("required variable(s) added")),
+        "expected required variable addition in diff: {:?}",
+        diff.breaking
+    );
+}
+
+#[test]
+fn compute_resource_contract_diff_marks_variable_removal_as_breaking() {
+    let base_payload = json!({
+        "schema_contract_version": 1,
+        "source": {
+            "mode": "endpoint_introspection_snapshot",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
+            "captured_at": "2026-02-23T00:00:00Z",
+            "origin": "https://example.kibe.la",
+            "endpoint": "https://example.kibe.la/api/v1",
+            "upstream_commit": "",
+        },
+        "resources": [{
+            "name": "searchNote",
+            "kind": "query",
+            "operation": "SearchNote",
+            "all_variables": ["query", "first", "after"],
+            "required_variables": ["query"],
+            "graphql_file": "endpoint:query.search",
+            "client_method": "search_note",
+            "document": "query SearchNote($query: String!) { search(query: $query) { __typename } }"
+        }]
+    });
+    let target_payload = json!({
+        "schema_contract_version": 1,
+        "source": {
+            "mode": "endpoint_introspection_snapshot",
+            "endpoint_snapshot": "schema/introspection/resource_contracts.endpoint.snapshot.json",
+            "captured_at": "2026-02-24T00:00:00Z",
+            "origin": "https://example.kibe.la",
+            "endpoint": "https://example.kibe.la/api/v1",
+            "upstream_commit": "",
+        },
+        "resources": [{
+            "name": "searchNote",
+            "kind": "query",
+            "operation": "SearchNote",
+            "all_variables": ["query"],
+            "required_variables": ["query"],
+            "graphql_file": "endpoint:query.search",
+            "client_method": "search_note",
+            "document": "query SearchNote($query: String!) { search(query: $query) { __typename } }"
+        }]
+    });
+    let base = normalize_resource_snapshot(&base_payload).expect("base should parse");
+    let target = normalize_resource_snapshot(&target_payload).expect("target should parse");
+    let diff = compute_resource_contract_diff(&base, &target);
+    assert!(
+        diff.breaking
+            .iter()
+            .any(|item| item.contains("variable(s) removed")),
+        "expected variable removal in diff: {:?}",
         diff.breaking
     );
 }

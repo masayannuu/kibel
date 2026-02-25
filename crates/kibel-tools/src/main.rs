@@ -2128,29 +2128,69 @@ fn compute_resource_contract_diff(
             .iter()
             .map(String::as_str)
             .collect::<HashSet<_>>();
+        let base_all = base_item
+            .all_variables
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
         let target_required = target_item
             .required_variables
             .iter()
             .map(String::as_str)
             .collect::<HashSet<_>>();
-        let removed_required = base_required
-            .difference(&target_required)
+        let target_all = target_item
+            .all_variables
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+
+        let mut removed_all = base_all
+            .difference(&target_all)
             .copied()
             .collect::<Vec<_>>();
-        if !removed_required.is_empty() {
+        removed_all.sort_unstable();
+        if !removed_all.is_empty() {
             breaking.push(format!(
-                "resource required variable(s) removed: `{}` {}",
+                "resource variable(s) removed: `{}` {}",
                 base_item.name,
-                removed_required.join(", ")
+                removed_all.join(", ")
             ));
         }
 
-        let added_required = target_required
+        let mut added_all = target_all
+            .difference(&base_all)
+            .copied()
+            .collect::<Vec<_>>();
+        added_all.sort_unstable();
+        if !added_all.is_empty() {
+            notes.push(format!(
+                "resource variable(s) added: `{}` {}",
+                base_item.name,
+                added_all.join(", ")
+            ));
+        }
+
+        let mut relaxed_required = base_required
+            .difference(&target_required)
+            .filter(|name| target_all.contains(**name))
+            .copied()
+            .collect::<Vec<_>>();
+        relaxed_required.sort_unstable();
+        if !relaxed_required.is_empty() {
+            notes.push(format!(
+                "resource required variable(s) no longer mandatory: `{}` {}",
+                base_item.name,
+                relaxed_required.join(", ")
+            ));
+        }
+
+        let mut added_required = target_required
             .difference(&base_required)
             .copied()
             .collect::<Vec<_>>();
+        added_required.sort_unstable();
         if !added_required.is_empty() {
-            notes.push(format!(
+            breaking.push(format!(
                 "resource required variable(s) added: `{}` {}",
                 base_item.name,
                 added_required.join(", ")
