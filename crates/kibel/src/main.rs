@@ -839,10 +839,7 @@ fn execute_note(
 
     match &args.command {
         cli::NoteCommand::Create(command) => {
-            let client_mutation_id = command
-                .client_mutation_id
-                .clone()
-                .or_else(|| command.idempotency_key.clone());
+            let client_mutation_id = command.client_mutation_id.clone();
             let folders = command
                 .folders
                 .iter()

@@ -1,7 +1,0 @@
-mutation CreateCommentReply($input: CreateCommentReplyInput!) {
-  createCommentReply(input: $input) {
-    reply {
-      id
-    }
-  }
-}
