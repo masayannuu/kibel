@@ -20,4 +20,4 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   exit 127
 fi
 
-"${KBIN}" --json graphql run --query "${QUERY}" --variables "${VARIABLES}"
+"${KBIN}" graphql run --query "${QUERY}" --variables "${VARIABLES}"
