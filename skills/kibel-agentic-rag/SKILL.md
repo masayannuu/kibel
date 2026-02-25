@@ -307,5 +307,7 @@ Unknowns:
 - `templates/ambiguity_planner_card.md`: ambiguity decomposition worksheet.
 - `eval/dataset_v1.json`: reproducible question set (`>=20` cases).
 - `eval/run_eval_v1.js`: baseline/planner/planner+corrective evaluation runner.
+- `eval/score_human_labels_v1.js`: judge-filled `human_labels.csv` aggregator.
+- `eval/gate_eval_v1.js`: retrieval/promotion gate checker.
 - `docs/agentic-rag-architecture.md`: architecture and KPI-based evaluation.
 - `docs/agentic-rag-evaluation-protocol.md`: evaluation contract and gates.
