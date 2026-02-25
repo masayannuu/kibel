@@ -83,6 +83,19 @@ Use this when user intent is "my latest docs", "what I wrote recently", or "my n
 "${KBIN}" --json search note --query "<query>" --first 16
 ```
 
+Cursor pagination:
+
+```bash
+"${KBIN}" --json search note --query "<query>" --after "<cursor>" --first 16
+```
+
+Optional reusable preset:
+
+```bash
+"${KBIN}" --json search note --query "<query>" --save-preset "<name>"
+"${KBIN}" --json search note --preset "<name>"
+```
+
 ### 3. Precision narrowing
 
 ```bash
@@ -100,7 +113,13 @@ Notes:
 - if `--resource` is omitted, `NOTE` is used by default.
 - `--mine` is exclusive and cannot be combined with other search filters (`INPUT_INVALID`).
 - `--user-id` is optional. Do not block on unknown user IDs.
-- If user ID is unknown, first narrow by `--group-id`/`--folder-id`, then verify candidates via `note get` and use returned author metadata to infer the next filter.
+- If user ID is unknown, discover candidates first:
+
+```bash
+"${KBIN}" --json search user --query "<query>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
+```
+
+Then verify candidate notes.
 
 ## Verification step (optional but recommended)
 
@@ -108,6 +127,7 @@ Use result `id` or `path` to validate top hits:
 
 ```bash
 "${KBIN}" --json note get --id "<NOTE_ID>"
+"${KBIN}" --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 "${KBIN}" --json note get-from-path --path "/notes/<number>"
 ```
 

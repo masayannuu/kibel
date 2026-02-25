@@ -73,6 +73,19 @@ Run 2-3 broad queries (synonyms allowed):
 "${KBIN}" --json search note --query "<topic>" --first 16
 ```
 
+When result volume is high, paginate forward with cursor:
+
+```bash
+"${KBIN}" --json search note --query "<topic>" --after "<cursor>" --first 16
+```
+
+Optional reusable preset:
+
+```bash
+"${KBIN}" --json search note --query "<topic>" --save-preset "<name>"
+"${KBIN}" --json search note --preset "<name>"
+```
+
 Optionally include latest self context:
 
 ```bash
@@ -95,7 +108,13 @@ Narrow with filters where known:
 Rules:
 
 - `--user-id` is optional; if unknown, continue with group/folder filters first.
-- When author precision is required, collect candidate note IDs first, then inspect returned note metadata (`note get`) to pin the correct author ID.
+- When author precision is required, discover author candidates first:
+
+```bash
+"${KBIN}" --json search user --query "<topic>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
+```
+
+Then inspect returned note metadata (`note get`) to pin the correct author ID.
 - `--mine` is for self-latest only; do not combine it with other search filters.
 
 ### Pass 3: Verification
@@ -104,6 +123,7 @@ Fetch full note bodies for top candidates:
 
 ```bash
 "${KBIN}" --json note get --id "<NOTE_ID>"
+"${KBIN}" --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 ```
 
 or:

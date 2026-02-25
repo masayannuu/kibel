@@ -66,11 +66,11 @@ Security note:
 ## Command family guidance
 
 - Discovery/read:
-  - `search note`, `search folder`
+  - `search note`, `search folder`, `search user`
   - `group list`
   - `folder list/get/get-from-path/notes`
   - `feed sections`
-  - `note get/get-from-path`
+  - `note get/get-many/get-from-path`
 - Update/write (explicit user intent required):
   - `note create/update/move-to-folder/attach-to-folder`
   - `comment create/reply`
@@ -89,8 +89,9 @@ Security note:
 
 1. Confirm objective and constraints (read-only / write-allowed).
 2. Use structured CLI commands first.
-3. Use `graphql run` only when structured command is missing.
-4. Return output with:
+3. For search loops, use cursor pagination (`search note --after`) and optional presets (`--save-preset` / `--preset`) before falling back to ad-hoc GraphQL.
+4. Use `graphql run` only when structured command is missing.
+5. Return output with:
    - command(s) executed
    - key results
    - unknowns and next action
