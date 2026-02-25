@@ -7,6 +7,13 @@
 
 # kibel
 
+[![CI](https://github.com/masayannuu/kibel/actions/workflows/ci.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/ci.yml)
+[![Release](https://github.com/masayannuu/kibel/actions/workflows/release.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> Community-maintained **unofficial** CLI/client for Kibela Web API.
+> Not affiliated with or endorsed by Bit Journey, Inc.
+
 Rust CLI + client library for Kibela GraphQL.
 Primary audience: coding agents and automation workflows that need deterministic, script-friendly Kibela access.
 
