@@ -254,21 +254,6 @@ enum ResourceContractAction {
     Diff(ResourceContractDiffArgs),
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum DocumentFallbackMode {
-    /// Default mode. Do not use legacy `.graphql` templates.
-    Strict,
-    /// Emergency mode for historical/partial snapshots.
-    /// Allows manual fallback templates in `operation_documents/*.graphql`.
-    Breakglass,
-}
-
-impl DocumentFallbackMode {
-    fn allow_legacy(self) -> bool {
-        matches!(self, Self::Breakglass)
-    }
-}
-
 #[derive(Args, Clone)]
 struct CreateNoteContractArgs {
     #[arg(
@@ -314,13 +299,6 @@ struct ResourceContractArgs {
         default_value = "crates/kibel-client/src/generated_resource_contracts.rs"
     )]
     generated: String,
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = DocumentFallbackMode::Strict,
-        help = "Document fallback policy: strict (default, generated-only) or breakglass (allow manual operation_documents/*.graphql)"
-    )]
-    document_fallback_mode: DocumentFallbackMode,
 }
 
 #[derive(Args, Clone)]
@@ -356,13 +334,6 @@ struct EndpointRefreshArgs {
     endpoint: Option<String>,
     #[arg(long, default_value_t = 30)]
     timeout_secs: u64,
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = DocumentFallbackMode::Strict,
-        help = "Document fallback policy: strict (default, generated-only) or breakglass (allow manual operation_documents/*.graphql)"
-    )]
-    document_fallback_mode: DocumentFallbackMode,
 }
 
 #[derive(Debug, Clone)]
@@ -1173,49 +1144,6 @@ fn build_operation_document(
     }
 }
 
-fn legacy_operation_document(resource_name: &str) -> Option<&'static str> {
-    // NOTE:
-    // These files are manually maintained breakglass assets.
-    // Normal operation should stay in strict mode and use introspection-generated
-    // operation documents from endpoint snapshot.
-    match resource_name {
-        "searchNote" => Some(include_str!("../operation_documents/search_note.graphql")),
-        "searchFolder" => Some(include_str!("../operation_documents/search_folder.graphql")),
-        "getGroups" => Some(include_str!("../operation_documents/get_groups.graphql")),
-        "getFolders" => Some(include_str!("../operation_documents/get_folders.graphql")),
-        "getNotes" => Some(include_str!("../operation_documents/get_notes.graphql")),
-        "getNote" => Some(include_str!("../operation_documents/get_note.graphql")),
-        "getNoteFromPath" => Some(include_str!(
-            "../operation_documents/get_note_from_path.graphql"
-        )),
-        "getFolder" => Some(include_str!("../operation_documents/get_folder.graphql")),
-        "getFolderFromPath" => Some(include_str!(
-            "../operation_documents/get_folder_from_path.graphql"
-        )),
-        "getFeedSections" => Some(include_str!(
-            "../operation_documents/get_feed_sections.graphql"
-        )),
-        "createNote" => Some(include_str!("../operation_documents/create_note.graphql")),
-        "createComment" => Some(include_str!(
-            "../operation_documents/create_comment.graphql"
-        )),
-        "createCommentReply" => Some(include_str!(
-            "../operation_documents/create_comment_reply.graphql"
-        )),
-        "createFolder" => Some(include_str!("../operation_documents/create_folder.graphql")),
-        "moveNoteToAnotherFolder" => Some(include_str!(
-            "../operation_documents/move_note_to_another_folder.graphql"
-        )),
-        "attachNoteToFolder" => Some(include_str!(
-            "../operation_documents/attach_note_to_folder.graphql"
-        )),
-        "updateNoteContent" => Some(include_str!(
-            "../operation_documents/update_note_content.graphql"
-        )),
-        _ => None,
-    }
-}
-
 fn get_trimmed_string(
     object: &serde_json::Map<String, Value>,
     key: &str,
@@ -1607,7 +1535,6 @@ fn build_endpoint_snapshot_from_introspection(
     origin: &str,
     endpoint: &str,
     captured_at: &str,
-    fallback_mode: DocumentFallbackMode,
 ) -> ToolResult<Value> {
     let query_fields = parse_graphql_fields(payload, "query")?;
     let mutation_fields = parse_graphql_fields(payload, "mutation")?;
@@ -1637,28 +1564,13 @@ fn build_endpoint_snapshot_from_introspection(
                 required_variables.push(arg.name.clone());
             }
         }
-        let document = if let Some(generated_document) =
-            build_operation_document(definition, field_spec, &type_map)
-        {
-            // Primary path: generate trusted document from live endpoint introspection.
-            generated_document
-        } else if fallback_mode.allow_legacy() {
-            // Emergency path only: use manual fallback template.
-            legacy_operation_document(definition.name)
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    format!(
-                        "failed to build operation document for `{}`; no breakglass template found",
-                        definition.name
-                    )
-                })?
-        } else {
-            return Err((format!(
-                "failed to build operation document for `{}` in strict mode",
-                definition.name
-            ))
-            .into());
-        };
+        let document =
+            build_operation_document(definition, field_spec, &type_map).ok_or_else(|| {
+                format!(
+                    "failed to build operation document for `{}` from endpoint introspection",
+                    definition.name
+                )
+            })?;
 
         resources.push(json!({
             "name": definition.name,
@@ -1690,23 +1602,17 @@ fn build_endpoint_snapshot_from_introspection(
 }
 
 #[allow(clippy::too_many_lines)]
-fn load_endpoint_snapshot(
-    path: &Path,
-    fallback_mode: DocumentFallbackMode,
-) -> ToolResult<EndpointSnapshot> {
+fn load_endpoint_snapshot(path: &Path) -> ToolResult<EndpointSnapshot> {
     let payload = read_json(path)?;
-    parse_endpoint_snapshot(&payload, fallback_mode)
+    parse_endpoint_snapshot(&payload)
 }
 
-fn parse_endpoint_snapshot(
-    payload: &Value,
-    fallback_mode: DocumentFallbackMode,
-) -> ToolResult<EndpointSnapshot> {
+fn parse_endpoint_snapshot(payload: &Value) -> ToolResult<EndpointSnapshot> {
     let object = payload
         .as_object()
         .ok_or_else(|| "endpoint snapshot must be an object".to_string())?;
     let resources_array = endpoint_snapshot_resources_array(object)?;
-    let resources = parse_endpoint_resources(resources_array, fallback_mode)?;
+    let resources = parse_endpoint_resources(resources_array)?;
     validate_endpoint_resource_coverage(&resources)?;
     Ok(EndpointSnapshot {
         captured_at: endpoint_snapshot_meta_value(object, "captured_at"),
@@ -1730,11 +1636,10 @@ fn endpoint_snapshot_resources_array(
 
 fn parse_endpoint_resources(
     resources_array: &[Value],
-    fallback_mode: DocumentFallbackMode,
 ) -> ToolResult<HashMap<String, EndpointResource>> {
     let mut resources = HashMap::new();
     for (index, item) in resources_array.iter().enumerate() {
-        let resource = parse_endpoint_resource(item, index, fallback_mode)?;
+        let resource = parse_endpoint_resource(item, index)?;
         if resources.contains_key(&resource.name) {
             return Err((format!(
                 "duplicate resource name in endpoint snapshot: {}",
@@ -1747,11 +1652,7 @@ fn parse_endpoint_resources(
     Ok(resources)
 }
 
-fn parse_endpoint_resource(
-    item: &Value,
-    index: usize,
-    fallback_mode: DocumentFallbackMode,
-) -> ToolResult<EndpointResource> {
+fn parse_endpoint_resource(item: &Value, index: usize) -> ToolResult<EndpointResource> {
     let context = format!("resources[{index}]");
     let object = item
         .as_object()
@@ -1790,7 +1691,7 @@ fn parse_endpoint_resource(
     )?;
     validate_required_subset(&name, &all_variables, &required_variables)?;
 
-    let document = parse_endpoint_resource_document(object, &name, fallback_mode)?;
+    let document = parse_endpoint_resource_document(object, &name)?;
     Ok(EndpointResource {
         name,
         kind,
@@ -1826,7 +1727,6 @@ fn validate_required_subset(
 fn parse_endpoint_resource_document(
     object: &serde_json::Map<String, Value>,
     resource_name: &str,
-    fallback_mode: DocumentFallbackMode,
 ) -> ToolResult<String> {
     Ok(object
         .get("document")
@@ -1834,23 +1734,10 @@ fn parse_endpoint_resource_document(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| {
-            if fallback_mode.allow_legacy() {
-                legacy_operation_document(resource_name).map(str::to_string)
-            } else {
-                None
-            }
-        })
         .ok_or_else(|| {
-            if fallback_mode.allow_legacy() {
-                format!(
-                    "resource `{resource_name}` missing `document` and no breakglass template is available"
-                )
-            } else {
-                format!(
-                    "resource `{resource_name}` missing `document` (strict mode). re-run refresh/write or use --document-fallback-mode breakglass temporarily"
-                )
-            }
+            format!(
+                "resource `{resource_name}` missing `document`; re-run refresh-endpoint to regenerate endpoint snapshot"
+            )
         })?)
 }
 
@@ -2441,8 +2328,7 @@ fn run_resource_contract_check(root: &Path, args: &ResourceContractArgs) -> Tool
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
 
-    let endpoint_snapshot =
-        load_endpoint_snapshot(&endpoint_snapshot_path, args.document_fallback_mode)?;
+    let endpoint_snapshot = load_endpoint_snapshot(&endpoint_snapshot_path)?;
     let expected_snapshot_value =
         build_resource_snapshot_value(root, &endpoint_snapshot_path, &endpoint_snapshot)?;
     let expected_snapshot = normalize_resource_snapshot(&expected_snapshot_value)?;
@@ -2476,8 +2362,7 @@ fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> Tool
     let snapshot_path = resolve_path(root, &args.snapshot);
     let generated_path = resolve_path(root, &args.generated);
 
-    let endpoint_snapshot =
-        load_endpoint_snapshot(&endpoint_snapshot_path, args.document_fallback_mode)?;
+    let endpoint_snapshot = load_endpoint_snapshot(&endpoint_snapshot_path)?;
     let snapshot_value =
         build_resource_snapshot_value(root, &endpoint_snapshot_path, &endpoint_snapshot)?;
     write_json_pretty(&snapshot_path, &snapshot_value)?;
@@ -2520,7 +2405,6 @@ fn run_resource_contract_refresh_endpoint(
         origin,
         &endpoint,
         &captured_at,
-        args.document_fallback_mode,
     )?;
 
     let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);

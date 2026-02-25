@@ -36,6 +36,23 @@ echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
+echo "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
+
+SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)" || {
+  echo "search note smoke failed" >&2
+  exit 3
+}
+echo "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+  echo "search note smoke returned not ok" >&2
+  exit 3
+}
+echo "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+  echo "search note output shape mismatch: .data.results[] expected" >&2
+  exit 3
+}
 ```
 
 Proceed only if `ok: true`.
@@ -68,6 +85,13 @@ Security note:
 - `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
 
 ## Core retrieval flows
+
+## Canonical JSON selectors
+
+- `search note` items: `.data.results[]`
+- `search note` page cursor: `.data.page_info.endCursor`
+- `search user` items: `.data.users[]`
+- `auth status`: `.data.logged_in`, `.data.team`, `.data.origin`
 
 ### 1. Mine latest (high precision, low latency)
 

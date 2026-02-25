@@ -25,9 +25,10 @@ Fallback (manual skill-installer):
 ```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
   --repo masayannuu/kibel \
-  --path skills/kibel-agentic-search \
-  --path skills/kibel-agentic-rag \
-  --path skills/kibel-cli-operator
+  --path \
+  skills/kibel-agentic-search \
+  skills/kibel-agentic-rag \
+  skills/kibel-cli-operator
 ```
 
 Restart Codex after installation.

@@ -340,8 +340,6 @@ pub struct NoteCreateArgs {
     pub published_at: Option<String>,
     #[arg(long = "client-mutation-id")]
     pub client_mutation_id: Option<String>,
-    #[arg(long = "idempotency-key", hide = true)]
-    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -612,34 +610,6 @@ mod tests {
                     assert_eq!(create.author_id.as_deref(), Some("U1"));
                     assert_eq!(create.published_at.as_deref(), Some("2026-02-23T00:00:00Z"));
                     assert_eq!(create.client_mutation_id.as_deref(), Some("cmid-1"));
-                }
-                _ => panic!("expected create command"),
-            },
-            _ => panic!("expected note command"),
-        }
-    }
-
-    #[test]
-    fn parse_note_create_accepts_legacy_idempotency_key_alias() {
-        let cli = Cli::try_parse_from([
-            "kibel",
-            "note",
-            "create",
-            "--title",
-            "hello",
-            "--content",
-            "world",
-            "--group-id",
-            "G1",
-            "--idempotency-key",
-            "legacy-key",
-        ])
-        .expect("parse should succeed");
-
-        match cli.command {
-            Command::Note(args) => match args.command {
-                NoteCommand::Create(create) => {
-                    assert_eq!(create.idempotency_key.as_deref(), Some("legacy-key"));
                 }
                 _ => panic!("expected create command"),
             },

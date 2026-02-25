@@ -71,14 +71,6 @@ query GetCurrentUserLatestNotes($first: Int!) {
 }
 ";
 
-const QUERY_CURRENT_USER_ID: &str = r"
-query GetCurrentUserId {
-  currentUser {
-    id
-  }
-}
-";
-
 #[must_use]
 pub fn resource_contracts() -> &'static [ResourceContract] {
     generated_resource_contracts::RESOURCE_CONTRACTS
@@ -614,28 +606,6 @@ impl KibelClient {
             }));
         }
         Ok(Value::Array(items))
-    }
-
-    /// Returns current authenticated user id.
-    ///
-    /// # Errors
-    /// Returns transport/API errors from GraphQL.
-    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
-        let payload = self.run_internal_bootstrap_query(
-            QUERY_CURRENT_USER_ID,
-            json!({}),
-            self.timeout_ms,
-            512 * 1024,
-            INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
-        )?;
-        payload
-            .pointer("/data/currentUser/id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .ok_or_else(|| KibelClientError::Api {
-                code: "NOT_FOUND".to_string(),
-                message: "current user id not found".to_string(),
-            })
     }
 
     fn run_internal_bootstrap_query(

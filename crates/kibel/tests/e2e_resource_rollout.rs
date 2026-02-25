@@ -1,6 +1,9 @@
 use serde_json::{json, Value};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static UNIQUE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn run_kibel_json(args: &[&str], envs: &[(&str, String)]) -> (Output, Value) {
     let mut command = Command::new(assert_cmd::cargo::cargo_bin!("kibel"));
@@ -44,7 +47,9 @@ fn unique_value(prefix: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("clock should be monotonic")
         .as_nanos();
-    format!("{prefix}-{now}")
+    let seq = UNIQUE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    format!("{prefix}-{pid}-{now}-{seq}")
 }
 
 fn isolated_capture_path() -> String {

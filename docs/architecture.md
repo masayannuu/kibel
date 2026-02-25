@@ -32,7 +32,7 @@
 ## Design principles
 
 - クエリ定義は Kibela GraphQL endpoint 契約に寄せる（引数名・フィールド名を揃える）。
-- デフォルト件数 (`first`) は既存CLI互換の既定値を使用する。
+- デフォルト件数 (`first`) は明示されたプロダクト既定値を使用する。
 - モデルは「必要十分」: CLIで利用するフィールドだけを厳選し、過剰な静的型を避ける。
 - 契約管理は endpoint snapshot 起点の単一路線:
   - CI基準: endpoint introspection snapshot から作る snapshot/codegen

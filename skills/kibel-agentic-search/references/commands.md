@@ -6,6 +6,12 @@
 kibel --json auth status
 ```
 
+Canonical auth selectors:
+
+```bash
+kibel --json auth status | jq '{logged_in: .data.logged_in, team: .data.team, origin: .data.origin}'
+```
+
 If auth is not ready:
 
 ```bash
@@ -28,16 +34,34 @@ Broad recall:
 kibel --json search note --query "<query>" --first 16
 ```
 
+Count:
+
+```bash
+kibel --json search note --query "<query>" --first 16 | jq '.data.results | length'
+```
+
 Cursor next page:
 
 ```bash
 kibel --json search note --query "<query>" --after "<cursor>" --first 16
 ```
 
+Cursor:
+
+```bash
+kibel --json search note --query "<query>" --first 16 | jq -r '.data.page_info.endCursor // empty'
+```
+
 User discovery:
 
 ```bash
 kibel --json search user --query "<query>" --first 10
+```
+
+User count:
+
+```bash
+kibel --json search user --query "<query>" --first 10 | jq '.data.users | length'
 ```
 
 Precision narrowing:

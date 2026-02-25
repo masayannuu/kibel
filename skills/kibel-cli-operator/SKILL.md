@@ -31,6 +31,23 @@ echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
+echo "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
+
+SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)" || {
+  echo "search note smoke failed" >&2
+  exit 3
+}
+echo "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+  echo "search note smoke returned not ok" >&2
+  exit 3
+}
+echo "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+  echo "search note output shape mismatch: .data.results[] expected" >&2
+  exit 3
+}
 "${KBIN}" --help
 ```
 
@@ -62,6 +79,13 @@ Security note:
 
 - ローカル運用は interactive login を優先（keychain/config に保存）。
 - `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
+
+## Canonical JSON selectors
+
+- `search note`: `.data.results[]`
+- `search note` cursor: `.data.page_info.endCursor`
+- `search user`: `.data.users[]`
+- `auth status`: `.data.logged_in`, `.data.team`, `.data.origin`
 
 ## Command family guidance
 

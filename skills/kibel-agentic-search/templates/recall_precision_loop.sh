@@ -21,4 +21,13 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
 fi
 
 "${KBIN}" --json auth status
-"${KBIN}" --json search note --query "${QUERY}" --first "${FIRST}"
+RESULT_JSON="$("${KBIN}" --json search note --query "${QUERY}" --first "${FIRST}")"
+echo "${RESULT_JSON}" | jq -e '.ok == true' >/dev/null
+echo "${RESULT_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null
+COUNT="$(echo "${RESULT_JSON}" | jq '.data.results | length')"
+CURSOR="$(echo "${RESULT_JSON}" | jq -r '.data.page_info.endCursor // empty')"
+echo "result_count=${COUNT}"
+if [[ -n "${CURSOR}" ]]; then
+  echo "end_cursor=${CURSOR}"
+fi
+echo "${RESULT_JSON}"

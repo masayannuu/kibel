@@ -9,7 +9,7 @@ Provide official agent workflows so Codex/Claude Code can use `kibel` immediatel
 - `skills/kibel-agentic-search`
   - Fast retrieval and narrowing workflow for Kibela notes.
 - `skills/kibel-agentic-rag`
-  - Retrieval -> verification -> citation-first synthesis workflow.
+  - Route-select + corrective-loop + verification を含む Agentic RAG workflow.
 - `skills/kibel-cli-operator`
   - Broad CLI operation skill including safe `graphql run` query workflows.
 
@@ -17,6 +17,7 @@ Provide official agent workflows so Codex/Claude Code can use `kibel` immediatel
 
 - Read-first default: no mutation commands.
 - Deterministic steps: preflight, recall, precision, verification, report.
+- Profile-driven exploration: `fast` / `balanced` / `deep`.
 - Evidence-first output: every claim should be traceable to Kibela note URL/path.
 - Stable interface usage: only official command surface and JSON envelope.
 - Distribution-first runtime: skills assume a released `kibel` binary is installed in `PATH`.
@@ -41,9 +42,10 @@ Fallback (direct skill-installer):
 ```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
   --repo masayannuu/kibel \
-  --path skills/kibel-agentic-search \
-  --path skills/kibel-agentic-rag \
-  --path skills/kibel-cli-operator
+  --path \
+  skills/kibel-agentic-search \
+  skills/kibel-agentic-rag \
+  skills/kibel-cli-operator
 ```
 
 Then restart Codex.
@@ -57,6 +59,12 @@ Claude Code can use the same workflow docs directly:
 - `skills/kibel-cli-operator/SKILL.md`
 
 Treat each `SKILL.md` as an execution playbook and keep commands unchanged.
+
+## Agentic RAG Architecture
+
+詳細設計と評価指標は以下を参照:
+
+- `docs/agentic-rag-architecture.md`
 
 ## Guardrails
 

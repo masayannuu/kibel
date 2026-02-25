@@ -227,11 +227,7 @@ fn execute_auth(
             let store = KeychainTokenStore::default();
             let mut keychain_deleted = false;
             let mut keychain_error = None;
-            let mut subjects = token_store_lookup_subjects(&team, resolved_origin.as_deref());
-            if subjects.is_empty() {
-                subjects.push(team.clone());
-            }
-            for subject in subjects {
+            for subject in token_store_lookup_subjects(&team, resolved_origin.as_deref()) {
                 match store.delete_token(&subject) {
                     Ok(()) => keychain_deleted = true,
                     Err(err) => keychain_error = Some(err.to_string()),
@@ -261,8 +257,8 @@ fn execute_auth(
             let requested_origin = requested_origin_from_cli(cli);
             let resolved = resolve_access_token(
                 &ResolveTokenInput {
-                    requested_team,
-                    requested_origin,
+                    requested_team: requested_team.clone(),
+                    requested_origin: requested_origin.clone(),
                     stdin_token,
                     env_token,
                 },
@@ -274,12 +270,17 @@ fn execute_auth(
                 json!({
                     "logged_in": true,
                     "team": token.team,
+                    "origin": token.origin,
                     "token_source": token_source_label(token.source),
                 })
             } else {
                 json!({
                     "logged_in": false,
-                    "team": config.default_team,
+                    "team": config.resolve_team(requested_team.as_deref()),
+                    "origin": config.resolve_origin(
+                        requested_origin.as_deref(),
+                        requested_team.as_deref(),
+                    ),
                     "token_source": Value::Null,
                 })
             };
@@ -838,10 +839,7 @@ fn execute_note(
 
     match &args.command {
         cli::NoteCommand::Create(command) => {
-            let client_mutation_id = command
-                .client_mutation_id
-                .clone()
-                .or_else(|| command.idempotency_key.clone());
+            let client_mutation_id = command.client_mutation_id.clone();
             let folders = command
                 .folders
                 .iter()
@@ -1688,14 +1686,7 @@ fn resolve_login_token(
 }
 
 fn token_store_lookup_subjects(team: &str, origin: Option<&str>) -> Vec<String> {
-    let mut subjects = Vec::new();
-    if let Some(origin) = origin.and_then(normalize_origin_owned) {
-        subjects.push(token_store_subject(team, Some(&origin)));
-    }
-    if !subjects.iter().any(|subject| subject == team) {
-        subjects.push(team.to_string());
-    }
-    subjects
+    vec![token_store_subject(team, origin)]
 }
 
 fn prompt_text_input(label: &str) -> Result<String, CliError> {
@@ -2097,15 +2088,12 @@ mod tests {
     }
 
     #[test]
-    fn token_store_lookup_subjects_include_origin_specific_and_legacy_team() {
+    fn token_store_lookup_subjects_prefers_origin_scoped_subject() {
         let subjects =
             token_store_lookup_subjects("example-team", Some("https://example-team.kibe.la"));
         assert_eq!(
             subjects,
-            vec![
-                "origin::https://example-team.kibe.la::team::example-team".to_string(),
-                "example-team".to_string(),
-            ]
+            vec!["origin::https://example-team.kibe.la::team::example-team".to_string()]
         );
     }
 

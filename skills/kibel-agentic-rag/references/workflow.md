@@ -1,6 +1,19 @@
 # Workflow Reference (kibel-agentic-rag)
 
-## 1. Recall
+## Profile setup
+
+Set profile budget before retrieval:
+
+```bash
+PROFILE="${KIBEL_RAG_PROFILE:-balanced}"
+case "${PROFILE}" in
+  fast) FIRST=8; MAX_ROUNDS=1; MAX_NOTE_FETCH=4 ;;
+  deep) FIRST=24; MAX_ROUNDS=3; MAX_NOTE_FETCH=16 ;;
+  *) FIRST=16; MAX_ROUNDS=2; MAX_NOTE_FETCH=8 ;;
+esac
+```
+
+## 1. route_select
 
 Pre-check auth. If not ready:
 
@@ -8,25 +21,41 @@ Pre-check auth. If not ready:
 kibel --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 ```
 
-Run broad search 2-3 times with different query terms:
+Classify question: `direct / multi_hop / global`.
+
+## 2. seed_recall
+
+Run broad search 1-3 times with different query terms:
 
 ```bash
-kibel --json search note --query "<topic>" --first 16
+kibel --json search note --query "<topic>" --first "${FIRST}"
+```
+
+Count:
+
+```bash
+kibel --json search note --query "<topic>" --first "${FIRST}" | jq '.data.results | length'
 ```
 
 If results are many, paginate forward:
 
 ```bash
-kibel --json search note --query "<topic>" --after "<cursor>" --first 16
+kibel --json search note --query "<topic>" --after "<cursor>" --first "${FIRST}"
+```
+
+Cursor:
+
+```bash
+kibel --json search note --query "<topic>" --first "${FIRST}" | jq -r '.data.page_info.endCursor // empty'
 ```
 
 Optional personal context:
 
 ```bash
-kibel --json search note --mine --first 10
+kibel --json search note --mine --first "${FIRST}"
 ```
 
-## 2. Precision
+## 3. frontier_expand + precision
 
 Narrow candidates:
 
@@ -36,7 +65,7 @@ kibel --json search note \
   --user-id "<USER_ID>" \
   --group-id "<GROUP_ID>" \
   --folder-id "<FOLDER_ID>" \
-  --first 16
+  --first "${FIRST}"
 ```
 
 If `<USER_ID>` is unknown, omit it and keep narrowing with group/folder filters.
@@ -46,7 +75,7 @@ Or discover candidates first:
 kibel --json search user --query "<topic>" --first 10
 ```
 
-## 3. Verification
+## 4. evidence_pull + verification
 
 Get full source before final answer:
 
@@ -61,7 +90,15 @@ or
 kibel --json note get-from-path --path "/notes/<number>"
 ```
 
-## 4. Synthesis
+## 5. corrective_loop
+
+If evidence coverage is still weak:
+
+- rewrite query using missing entities/constraints
+- re-run `seed_recall` with remaining budget
+- stop when no new evidence is found twice
+
+## 6. Synthesis
 
 Return:
 

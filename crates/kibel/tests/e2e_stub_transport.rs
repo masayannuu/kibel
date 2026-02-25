@@ -1,7 +1,10 @@
 use serde_json::{json, Value};
 use std::fmt::Write;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static UNIQUE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn run_kibel_json(args: &[&str], envs: &[(&str, String)]) -> (Output, Value) {
     let mut command = Command::new(assert_cmd::cargo::cargo_bin!("kibel"));
@@ -32,7 +35,9 @@ fn unique_value(prefix: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("clock should be monotonic")
         .as_nanos();
-    format!("{prefix}-{now}")
+    let seq = UNIQUE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    format!("{prefix}-{pid}-{now}-{seq}")
 }
 
 fn isolated_config_path() -> String {
@@ -239,6 +244,42 @@ fn note_get_many_success_with_stub_fixture() {
         payload["data"]["notes"][1]["id"],
         Value::String("N1".to_string())
     );
+}
+
+#[test]
+fn auth_status_reports_origin_when_logged_in() {
+    let origin = "https://acme.kibe.la";
+    let (output, payload) = run_kibel_json(
+        &["auth", "status"],
+        &base_env(origin, fixture_note("N1", "stub-title", "stub-content")),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(payload["data"]["logged_in"], Value::Bool(true));
+    assert_eq!(payload["data"]["team"], Value::String("acme".to_string()));
+    assert_eq!(payload["data"]["origin"], Value::String(origin.to_string()));
+    assert_eq!(
+        payload["data"]["token_source"],
+        Value::String("env".to_string())
+    );
+}
+
+#[test]
+fn auth_status_reports_requested_origin_when_not_logged_in() {
+    let team = unique_value("acme-team");
+    let origin = "https://requested.kibe.la";
+    let (output, payload) = run_kibel_json(
+        &["--team", &team, "--origin", origin, "auth", "status"],
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(payload["data"]["logged_in"], Value::Bool(false));
+    assert_eq!(payload["data"]["team"], Value::String(team));
+    assert_eq!(payload["data"]["origin"], Value::String(origin.to_string()));
+    assert_eq!(payload["data"]["token_source"], Value::Null);
 }
 
 #[test]

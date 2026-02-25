@@ -3,7 +3,7 @@
 ## Purpose
 
 This document defines the official interfaces of `kibel` as an automation-grade CLI.
-The goal is to keep agent/tool integrations stable while allowing additive evolution.
+Current phase is pre-public hardening: interfaces may change when quality/security improves.
 
 ## Interface Layers
 
@@ -14,19 +14,11 @@ The goal is to keep agent/tool integrations stable while allowing additive evolu
 3. Config/auth interface: token/origin/team resolution behavior.
 4. Safety interface: operation allowlist and explicit unsupported scope.
 
-## Stability Policy
+## Stability Policy (Pre-Public)
 
-- Stable:
-  - Existing command paths documented in this file.
-  - Existing `error.code` values and exit code mapping.
-  - Existing auth precedence.
-- Additive-compatible:
-  - New commands, new optional flags, and new response fields.
-- Breaking (major-only):
-  - Command path rename/removal.
-  - `error.code` rename/removal.
-  - Exit code mapping change.
-  - Auth precedence change.
+- No compatibility guarantee before public release.
+- Legacy alias / fallback paths are removed instead of retained.
+- Source of truth is always this document + current `main`.
 
 ## Official Command Surface
 
@@ -80,12 +72,20 @@ Ad-hoc lane:
 - `--mine` is a dedicated mode for latest notes by current user.
   - `--mine` cannot be combined with other search filters.
   - returns the current user's latest notes ordered by recency.
+- JSON data shape:
+  - `data.results`: note array
+  - `data.page_info`: pagination object (`endCursor`, `hasNextPage`, ...)
+  - `data.meta`: `{team, origin, token_source}`
 
 ### `search user`
 
 - `search note` 結果の `author` を集約して user discovery を行う補助コマンド。
 - `id`, `account`, `real_name`, `match_count` を返す。
 - `--group-id` / `--folder-id` で探索範囲を絞り込める。
+- JSON data shape:
+  - `data.users`: user array
+  - `data.page_info`: pagination object
+  - `data.meta`: `{team, origin, token_source}`
 
 ### `search folder`
 
@@ -162,6 +162,13 @@ Origin/team resolution:
 
 1. Team: `--team` (alias: `--tenant`) / `KIBELA_TEAM` (alias: `KIBELA_TENANT`) then config default team.
 2. Origin: `--origin` / `KIBELA_ORIGIN` (alias: `KIBELA_TENANT_ORIGIN`) then team profile origin.
+
+`auth status` JSON fields:
+
+- `data.logged_in`: authentication state.
+- `data.team`: resolved team (requested/default).
+- `data.origin`: resolved origin (requested/profile).
+- `data.token_source`: `stdin|env|keychain|config|null`.
 
 `auth login` interactive fallback (TTY only):
 

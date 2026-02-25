@@ -7,6 +7,12 @@
 - `kibel --json config profiles`
 - `kibel --json config set team <team>`
 
+Canonical selectors:
+
+- auth status: `.data.logged_in`, `.data.team`, `.data.origin`
+- search note: `.data.results[]`, `.data.page_info.endCursor`
+- search user: `.data.users[]`
+
 ## Search
 
 - `kibel --json search note --query "<query>" --first 16`

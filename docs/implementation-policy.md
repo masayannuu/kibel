@@ -4,7 +4,7 @@
 
 - Kibela GraphQL を安全に扱える実運用 CLI を維持する。
 - `kibel-client` を再利用可能な Rust ライブラリとして保つ。
-- 仕様変更時の破壊を CI で早期検知する。
+- 仕様変更時の破壊を CI で早期検知し、互換レイヤーを残さず更新する。
 
 ## Non-negotiable invariants
 
@@ -27,9 +27,8 @@
 - 変更検知の主経路は CI: endpoint snapshot 起点の契約再現性を保証する。
 - scheduled schema refresh workflow を維持し、差分はPRレビューで管理する。
 - trusted operation 実行モデルを優先し、ad-hoc 実行経路は明示的に分離する。
-- 互換性方針:
-  - CLI 破壊的変更は避ける。
-  - 互換 alias は明示管理し、移行完了後に削除計画を立てる。
+- プレ公開フェーズでは互換 alias / legacy fallback を持たない。
+- 破壊変更は即時に本流へ反映し、契約差分検知で回帰を防ぐ。
 
 ## Security posture
 

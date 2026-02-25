@@ -32,7 +32,7 @@ jobs:
       - name: Validate project quality gates
         run: |
           cargo run -p kibel-tools -- create-note-contract check
-          cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict
+          cargo run -p kibel-tools -- resource-contract check
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo test --workspace --all-features

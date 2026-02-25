@@ -3,20 +3,19 @@
 ## Add a new resource
 
 1. endpoint introspection snapshot を更新し、ローカル契約へ反映する。
-   - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
+   - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN"`
    - `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 2. `kibel-client` に入力構造体・実行メソッドを追加。
 3. `kibel` に CLI サブコマンドを追加。
 4. `--json` の出力形を固定化。
 5. unit test + stub E2E を追加。
 6. all-resource contract snapshot/codegen を同期。
-   - `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
+   - `cargo run -p kibel-tools -- resource-contract write`
 
 ## Regression checklist
 
 - 既存 error code マッピングを壊していないか。
 - auth precedence を壊していないか。
-- 非互換な引数名変更をしていないか。
 - token や機微情報が出力されていないか。
 
 ## Scheduled schema refresh
@@ -28,7 +27,7 @@
 - Flow:
   - live introspection refresh (endpoint)
   - create-note snapshot refresh (from endpoint snapshot)
-  - compatibility diff (blocking)
+  - contract diff (blocking)
   - contract write/check
   - quality checks
   - diff があれば PR 自動作成
@@ -43,7 +42,7 @@
    - `cargo test -p kibel-client --doc`
    - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
    - `cargo run -p kibel-tools -- create-note-contract check`
-   - `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
+   - `cargo run -p kibel-tools -- resource-contract check`
 3. package 検証を実行する。
    - `cargo package --locked -p kibel-client`
 4. `README.md` と `docs/` を実装に合わせて更新する。
