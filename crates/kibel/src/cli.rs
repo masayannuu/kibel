@@ -125,12 +125,15 @@ pub struct SearchArgs {
 pub enum SearchCommand {
     Note(SearchNoteArgs),
     Folder(SearchFolderArgs),
+    User(SearchUserArgs),
 }
 
 #[derive(Debug, Clone, Args)]
 pub struct SearchNoteArgs {
     #[arg(long, default_value = "")]
     pub query: String,
+    #[arg(long)]
+    pub after: Option<String>,
     #[arg(long = "resource")]
     pub resources: Vec<String>,
     #[arg(long)]
@@ -153,6 +156,10 @@ pub struct SearchNoteArgs {
     pub sort_by: Option<String>,
     #[arg(long)]
     pub first: Option<u32>,
+    #[arg(long)]
+    pub preset: Option<String>,
+    #[arg(long = "save-preset")]
+    pub save_preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -161,6 +168,18 @@ pub struct SearchFolderArgs {
     pub query: String,
     #[arg(long)]
     pub first: Option<u32>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SearchUserArgs {
+    #[arg(long, default_value = "")]
+    pub query: String,
+    #[arg(long)]
+    pub first: Option<u32>,
+    #[arg(long = "group-id")]
+    pub group_ids: Vec<String>,
+    #[arg(long = "folder-id")]
+    pub folder_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -294,6 +313,7 @@ pub struct NoteArgs {
 pub enum NoteCommand {
     Create(NoteCreateArgs),
     Get(NoteGetArgs),
+    GetMany(NoteGetManyArgs),
     GetFromPath(NoteGetFromPathArgs),
     Update(NoteUpdateArgs),
     MoveToFolder(NoteMoveToFolderArgs),
@@ -334,6 +354,12 @@ pub struct NoteFolderArg {
 pub struct NoteGetArgs {
     #[arg(long)]
     pub id: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct NoteGetManyArgs {
+    #[arg(long = "id", required = true)]
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -629,12 +655,18 @@ mod tests {
             "note",
             "--query",
             "rust",
+            "--after",
+            "cursor-1",
             "--resource",
             "note",
             "--group-id",
             "G1",
             "--first",
             "8",
+            "--preset",
+            "daily",
+            "--save-preset",
+            "daily",
         ])
         .expect("parse should succeed");
 
@@ -642,13 +674,17 @@ mod tests {
             Command::Search(args) => match args.command {
                 SearchCommand::Note(note) => {
                     assert_eq!(note.query, "rust");
+                    assert_eq!(note.after.as_deref(), Some("cursor-1"));
                     assert_eq!(note.resources, vec!["note"]);
                     assert_eq!(note.group_ids, vec!["G1"]);
                     assert_eq!(note.first, Some(8));
+                    assert_eq!(note.preset.as_deref(), Some("daily"));
+                    assert_eq!(note.save_preset.as_deref(), Some("daily"));
                     assert!(note.user_ids.is_empty());
                     assert!(!note.mine);
                 }
                 SearchCommand::Folder(_) => panic!("expected search note command"),
+                SearchCommand::User(_) => panic!("expected search note command"),
             },
             _ => panic!("expected search command"),
         }
@@ -664,9 +700,39 @@ mod tests {
                 SearchCommand::Note(note) => {
                     assert_eq!(note.query, "");
                     assert!(note.mine);
+                    assert!(note.after.is_none());
                     assert!(note.user_ids.is_empty());
                 }
                 SearchCommand::Folder(_) => panic!("expected search note command"),
+                SearchCommand::User(_) => panic!("expected search note command"),
+            },
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn parse_search_user_args() {
+        let cli = Cli::try_parse_from([
+            "kibel",
+            "search",
+            "user",
+            "--query",
+            "alice",
+            "--first",
+            "5",
+            "--group-id",
+            "G1",
+        ])
+        .expect("parse should succeed");
+
+        match cli.command {
+            Command::Search(args) => match args.command {
+                SearchCommand::User(user) => {
+                    assert_eq!(user.query, "alice");
+                    assert_eq!(user.first, Some(5));
+                    assert_eq!(user.group_ids, vec!["G1"]);
+                }
+                _ => panic!("expected search user command"),
             },
             _ => panic!("expected search command"),
         }
@@ -709,6 +775,22 @@ mod tests {
                     assert_eq!(move_args.to_folder.folder_name, "New");
                 }
                 _ => panic!("expected move-to-folder command"),
+            },
+            _ => panic!("expected note command"),
+        }
+    }
+
+    #[test]
+    fn parse_note_get_many_args() {
+        let cli = Cli::try_parse_from(["kibel", "note", "get-many", "--id", "N1", "--id", "N2"])
+            .expect("parse should succeed");
+
+        match cli.command {
+            Command::Note(args) => match args.command {
+                NoteCommand::GetMany(get_many) => {
+                    assert_eq!(get_many.ids, vec!["N1", "N2"]);
+                }
+                _ => panic!("expected get-many command"),
             },
             _ => panic!("expected note command"),
         }

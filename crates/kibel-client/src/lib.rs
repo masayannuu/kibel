@@ -16,6 +16,6 @@ pub use client::{
     KibelClient, MoveNoteToAnotherFolderInput, Note, PageInput, PathLookupInput, ResourceContract,
     SearchFolderInput, SearchNoteInput, TrustedOperation, UpdateNoteInput,
 };
-pub use config::{default_config_path, Config, Profile};
+pub use config::{default_config_path, Config, Profile, SearchNotePreset};
 pub use error::KibelClientError;
 pub use store::{InMemoryTokenStore, KeychainTokenStore, TokenStore};

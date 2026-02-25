@@ -104,12 +104,18 @@ export KIBELA_ACCESS_TOKEN="<your-token>"
 ```bash
 kibel --json auth status
 kibel --json search note --query onboarding --first 16
+kibel --json search note --query onboarding --after <cursor> --first 16
+kibel --json search user --query onboarding --first 10
+kibel --json search note --query onboarding --save-preset onboarding
+kibel --json search note --preset onboarding
 kibel --json search note --mine --first 10
 kibel --json note get --id N1
+kibel --json note get-many --id N1 --id N2
 kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
 `search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
+`search note --preset` / `--save-preset` で検索条件をローカル config に保存・再利用できます。
 
 `graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
 
@@ -220,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         is_archived: None,
         sort_by: None,
         first: Some(16),
+        after: None,
     })?;
     println!("results: {}", results);
     Ok(())
@@ -230,16 +237,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Create-note contract:
 
-- snapshot: `research/schema/create_note_contract.snapshot.json`
+- snapshot: `schema/contracts/create_note_contract.snapshot.json`
+- refresh from endpoint snapshot: `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 - check: `cargo run -p kibel-tools -- create-note-contract check`
 - update generated module: `cargo run -p kibel-tools -- create-note-contract write`
 
 All-resource contract:
 
-- endpoint snapshot source: `research/schema/resource_contracts.endpoint.snapshot.json`
-- normalized snapshot: `research/schema/resource_contracts.snapshot.json`
-- check: `cargo run -p kibel-tools -- resource-contract check`
-- update generated module: `cargo run -p kibel-tools -- resource-contract write`
+- endpoint snapshot source: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+- normalized snapshot: `schema/contracts/resource_contracts.snapshot.json`
+- refresh endpoint snapshot (strict): `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
+- check (strict): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode strict`
+- update generated module (strict): `cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict`
+- compatibility diff (blocking): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target schema/contracts/resource_contracts.snapshot.json --fail-on-breaking`
+- compatibility diff (machine-readable): `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
+- breakglass (temporary only): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass`
+
+Notes:
+- 通常運用（strict）では、trusted operation の `document` は endpoint introspection snapshot から自動生成されます。
+- `crates/kibel-tools/operation_documents/*.graphql` は breakglass 用の手動 fallback テンプレートです（通常フローでは不使用）。
 
 ## Development Quality Gates
 

@@ -143,7 +143,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn load_resource_specs(root: &Path) -> Result<HashMap<String, ResourceSpec>, String> {
-    let path = root.join("research/schema/resource_contracts.snapshot.json");
+    let path = root.join("schema/contracts/resource_contracts.snapshot.json");
     let raw = std::fs::read_to_string(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let payload = serde_json::from_str::<Value>(&raw)
@@ -184,7 +184,7 @@ fn load_resource_specs(root: &Path) -> Result<HashMap<String, ResourceSpec>, Str
 }
 
 fn load_create_note_schema_snapshot(root: &Path) -> Result<CreateNoteSchemaSnapshot, String> {
-    let path = root.join("research/schema/create_note_contract.snapshot.json");
+    let path = root.join("schema/contracts/create_note_contract.snapshot.json");
     let raw = std::fs::read_to_string(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let payload = serde_json::from_str::<Value>(&raw)

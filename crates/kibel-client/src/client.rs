@@ -26,16 +26,6 @@ const APQ_VERSION: u64 = 1;
 const APQ_GET_VARIABLES_LIMIT_BYTES: usize = 1024;
 const SEARCH_NOTE_RESOURCE_KINDS: [&str; 3] = ["NOTE", "COMMENT", "ATTACHMENT"];
 
-const QUERY_NOTE_GET: &str = r"
-query NoteGet($id: ID!) {
-  note(id: $id) {
-    id
-    title
-    content
-  }
-}
-";
-
 const QUERY_CREATE_NOTE_SCHEMA: &str = r#"
 query CreateNoteSchema {
   createNoteInput: __type(name: "CreateNoteInput") {
@@ -56,61 +46,7 @@ query CreateNoteSchema {
 }
 "#;
 
-const QUERY_SEARCH_NOTE: &str = r"
-query SearchNote(
-  $query: String!
-  $resources: [SearchResourceKind!]
-  $coediting: Boolean
-  $updated: SearchDate
-  $groupIds: [ID!]
-  $userIds: [ID!]
-  $folderIds: [ID!]
-  $likerIds: [ID!]
-  $isArchived: Boolean
-  $sortBy: SearchSortKind
-  $first: Int!
-) {
-  search(
-    query: $query
-    resources: $resources
-    coediting: $coediting
-    updated: $updated
-    groupIds: $groupIds
-    userIds: $userIds
-    folderIds: $folderIds
-    likerIds: $likerIds
-    isArchived: $isArchived
-    sortBy: $sortBy
-    first: $first
-  ) {
-    edges {
-      node {
-        document {
-          ... on Node {
-            id
-          }
-        }
-        title
-        url
-        contentSummaryHtml
-        path
-        author {
-          account
-          realName
-        }
-      }
-    }
-  }
-}
-";
-
-const QUERY_CURRENT_USER_ID: &str = r"
-query GetCurrentUserId {
-  currentUser {
-    id
-  }
-}
-";
+const INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER: &str = "currentUser";
 
 const QUERY_CURRENT_USER_LATEST_NOTES: &str = r"
 query GetCurrentUserLatestNotes($first: Int!) {
@@ -135,319 +71,10 @@ query GetCurrentUserLatestNotes($first: Int!) {
 }
 ";
 
-const QUERY_SEARCH_FOLDER: &str = r"
-query SearchFolder($query: String!, $first: Int!) {
-  searchFolder(query: $query, first: $first) {
-    edges {
-      node {
-        name
-        fixedPath
-        group {
-          name
-          isPrivate
-        }
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_GROUPS: &str = r"
-query GetGroups($first: Int!) {
-  groups(first: $first) {
-    edges {
-      node {
-        id
-        name
-        isDefault
-        isArchived
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_FOLDERS: &str = r"
-query GetFolders($first: Int!) {
-  folders(first: $first) {
-    edges {
-      node {
-        id
-        name
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_NOTES: &str = r"
-query GetNotes($folderId: ID!, $first: Int!, $last: Int) {
-  notes(folderId: $folderId, first: $first, last: $last) {
-    edges {
-      node {
-        id
-        title
-        url
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_NOTE_FROM_PATH: &str = r"
-query GetNoteFromPath($path: String!, $first: Int!) {
-  noteFromPath(path: $path) {
+const QUERY_CURRENT_USER_ID: &str = r"
+query GetCurrentUserId {
+  currentUser {
     id
-    title
-    content
-    url
-    author {
-      account
-      realName
-    }
-    folders(first: $first) {
-      edges {
-        node {
-          id
-          name
-          fullName
-          fixedPath
-          group {
-            id
-            name
-          }
-        }
-      }
-    }
-    comments(first: $first) {
-      edges {
-        node {
-          id
-          anchor
-          content
-          author {
-            account
-            realName
-          }
-          replies(first: $first) {
-            edges {
-              node {
-                id
-                anchor
-                content
-                author {
-                  account
-                  realName
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    inlineComments(first: $first) {
-      edges {
-        node {
-          id
-          anchor
-          content
-          author {
-            account
-            realName
-          }
-          replies(first: $first) {
-            edges {
-              node {
-                id
-                anchor
-                content
-                author {
-                  account
-                  realName
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_FOLDER: &str = r"
-query GetFolder($id: ID!, $first: Int!) {
-  folder(id: $id) {
-    name
-    fullName
-    fixedPath
-    createdAt
-    updatedAt
-    group {
-      id
-      name
-    }
-    folders(first: $first) {
-      edges {
-        node {
-          id
-          name
-        }
-      }
-    }
-    notes(first: $first) {
-      edges {
-        node {
-          id
-          title
-        }
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_FOLDER_FROM_PATH: &str = r"
-query GetFolderFromPath($path: String!, $first: Int!) {
-  folderFromPath(path: $path) {
-    name
-    fullName
-    fixedPath
-    createdAt
-    updatedAt
-    group {
-      id
-      name
-    }
-    folders(first: $first) {
-      edges {
-        node {
-          id
-          name
-        }
-      }
-    }
-    notes(first: $first) {
-      edges {
-        node {
-          id
-          title
-        }
-      }
-    }
-  }
-}
-";
-
-const QUERY_GET_FEED_SECTIONS: &str = r"
-query GetFeedSections($kind: FeedKind!, $groupId: ID!, $first: Int!) {
-  feedSections(kind: $kind, groupId: $groupId, first: $first) {
-    edges {
-      node {
-        ... on FeedNote {
-          date
-          note {
-            id
-            title
-            contentSummaryHtml
-          }
-        }
-        ... on FeedFolderParcel {
-          date
-          folder {
-            id
-            name
-          }
-          notes(first: $first) {
-            edges {
-              node {
-                id
-                title
-                contentSummaryHtml
-              }
-            }
-          }
-        }
-        ... on FeedUserParcel {
-          date
-          user {
-            account
-            realName
-          }
-          notes(first: $first) {
-            edges {
-              node {
-                id
-                title
-                contentSummaryHtml
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-";
-
-const MUTATION_CREATE_COMMENT: &str = r"
-mutation CreateComment($input: CreateCommentInput!) {
-  createComment(input: $input) {
-    comment {
-      id
-    }
-  }
-}
-";
-
-const MUTATION_CREATE_COMMENT_REPLY: &str = r"
-mutation CreateCommentReply($input: CreateCommentReplyInput!) {
-  createCommentReply(input: $input) {
-    reply {
-      id
-    }
-  }
-}
-";
-
-const MUTATION_CREATE_FOLDER: &str = r"
-mutation CreateFolder($input: CreateFolderInput!) {
-  createFolder(input: $input) {
-    folder {
-      id
-    }
-  }
-}
-";
-
-const MUTATION_MOVE_NOTE_TO_ANOTHER_FOLDER: &str = r"
-mutation MoveNoteToAnotherFolder($input: MoveNoteToAnotherFolderInput!) {
-  moveNoteToAnotherFolder(input: $input) {
-    note {
-      id
-    }
-  }
-}
-";
-
-const MUTATION_ATTACH_NOTE_TO_FOLDER: &str = r"
-mutation AttachNoteToFolder($input: AttachNoteToFolderInput!) {
-  attachNoteToFolder(input: $input) {
-    note {
-      id
-    }
-  }
-}
-";
-
-const MUTATION_UPDATE_NOTE_CONTENT: &str = r"
-mutation UpdateNoteContent($input: UpdateNoteContentInput!) {
-  updateNoteContent(input: $input) {
-    note {
-      id
-      title
-      content
-    }
   }
 }
 ";
@@ -475,6 +102,11 @@ pub fn trusted_operations() -> &'static [TrustedOperation] {
 #[must_use]
 pub fn trusted_operation_contract(operation: TrustedOperation) -> &'static ResourceContract {
     generated_resource_contracts::trusted_operation_contract(operation)
+}
+
+#[must_use]
+pub fn trusted_operation_document(operation: TrustedOperation) -> &'static str {
+    trusted_operation_contract(operation).document
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,6 +161,27 @@ pub struct SearchNoteInput {
     pub is_archived: Option<bool>,
     pub sort_by: Option<String>,
     pub first: Option<u32>,
+    pub after: Option<String>,
+}
+
+impl SearchNoteInput {
+    #[must_use]
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            resources: Vec::new(),
+            coediting: None,
+            updated: None,
+            group_ids: Vec::new(),
+            user_ids: Vec::new(),
+            folder_ids: Vec::new(),
+            liker_ids: Vec::new(),
+            is_archived: None,
+            sort_by: None,
+            first: None,
+            after: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -712,7 +365,7 @@ impl KibelClient {
 
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetNote,
-            QUERY_NOTE_GET,
+            trusted_operation_document(TrustedOperation::GetNote),
             json!({ "id": id }),
         )?;
         parse_note_at(&payload, "/data/note")
@@ -853,7 +506,7 @@ impl KibelClient {
 
         let payload = self.request_trusted_graphql(
             TrustedOperation::UpdateNoteContent,
-            MUTATION_UPDATE_NOTE_CONTENT,
+            trusted_operation_document(TrustedOperation::UpdateNoteContent),
             json!({
                 "input": {
                     "id": id,
@@ -871,12 +524,28 @@ impl KibelClient {
     /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
     /// or transport/API errors from GraphQL.
     pub fn search_note(&self, input: &SearchNoteInput) -> Result<Value, KibelClientError> {
+        let payload = self.search_note_with_page_info(input)?;
+        Ok(payload
+            .get("results")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())))
+    }
+
+    /// Searches notes and returns both result items and connection page info.
+    ///
+    /// # Errors
+    /// Returns [`KibelClientError::InputInvalid`] when paging is invalid,
+    /// or transport/API errors from GraphQL.
+    pub fn search_note_with_page_info(
+        &self,
+        input: &SearchNoteInput,
+    ) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
         let variables = build_search_note_variables(input, first)?;
 
         let payload = self.request_trusted_graphql(
             TrustedOperation::SearchNote,
-            QUERY_SEARCH_NOTE,
+            trusted_operation_document(TrustedOperation::SearchNote),
             Value::Object(variables),
         )?;
         let edges = require_array_at(&payload, "/data/search/edges", "search result not found")?;
@@ -890,27 +559,20 @@ impl KibelClient {
                 "contentSummaryHtml": node.get("contentSummaryHtml").cloned().unwrap_or(Value::Null),
                 "path": node.get("path").cloned().unwrap_or(Value::Null),
                 "author": {
+                    "id": node.pointer("/author/id").cloned().unwrap_or(Value::Null),
                     "account": node.pointer("/author/account").cloned().unwrap_or(Value::Null),
                     "realName": node.pointer("/author/realName").cloned().unwrap_or(Value::Null),
                 }
             }));
         }
-        Ok(Value::Array(items))
-    }
-
-    /// Returns the current authenticated user id.
-    ///
-    /// # Errors
-    /// Returns transport/API errors from GraphQL, or [`KibelClientError::Api`]
-    /// when the current user payload is unavailable.
-    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
-        let payload = self.run_untrusted_graphql(
-            QUERY_CURRENT_USER_ID,
-            json!({}),
-            self.timeout_ms,
-            128 * 1024,
-        )?;
-        parse_current_user_id(&payload)
+        let page_info = payload
+            .pointer("/data/search/pageInfo")
+            .cloned()
+            .unwrap_or(Value::Null);
+        Ok(json!({
+            "results": items,
+            "pageInfo": page_info,
+        }))
     }
 
     /// Returns latest notes for the current authenticated user.
@@ -923,11 +585,12 @@ impl KibelClient {
         input: PageInput,
     ) -> Result<Value, KibelClientError> {
         let first = normalize_first(input.first)?;
-        let payload = self.run_untrusted_graphql(
+        let payload = self.run_internal_bootstrap_query(
             QUERY_CURRENT_USER_LATEST_NOTES,
             json!({ "first": first }),
             self.timeout_ms,
             2 * 1024 * 1024,
+            INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
         )?;
         let edges = require_array_at(
             &payload,
@@ -953,6 +616,61 @@ impl KibelClient {
         Ok(Value::Array(items))
     }
 
+    /// Returns current authenticated user id.
+    ///
+    /// # Errors
+    /// Returns transport/API errors from GraphQL.
+    pub fn get_current_user_id(&self) -> Result<String, KibelClientError> {
+        let payload = self.run_internal_bootstrap_query(
+            QUERY_CURRENT_USER_ID,
+            json!({}),
+            self.timeout_ms,
+            512 * 1024,
+            INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
+        )?;
+        payload
+            .pointer("/data/currentUser/id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| KibelClientError::Api {
+                code: "NOT_FOUND".to_string(),
+                message: "current user id not found".to_string(),
+            })
+    }
+
+    fn run_internal_bootstrap_query(
+        &self,
+        query: &str,
+        variables: Value,
+        timeout_ms: u64,
+        max_response_bytes: usize,
+        expected_root_field: &str,
+    ) -> Result<Value, KibelClientError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(KibelClientError::InputInvalid(
+                "internal bootstrap query must not be empty".to_string(),
+            ));
+        }
+        if query.to_ascii_lowercase().starts_with("mutation") {
+            return Err(KibelClientError::InputInvalid(
+                "internal bootstrap lane does not allow mutation".to_string(),
+            ));
+        }
+        let root_field = extract_root_field(query).ok_or_else(|| {
+            KibelClientError::InputInvalid(
+                "failed to extract root field for internal bootstrap query".to_string(),
+            )
+        })?;
+        if root_field != expected_root_field {
+            return Err(KibelClientError::InputInvalid(format!(
+                "internal bootstrap query root field mismatch: expected `{expected_root_field}`, got `{root_field}`"
+            )));
+        }
+
+        self.run_untrusted_graphql(query, variables, timeout_ms, max_response_bytes)
+    }
+
     /// Searches folders.
     ///
     /// # Errors
@@ -968,7 +686,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::SearchFolder,
-            QUERY_SEARCH_FOLDER,
+            trusted_operation_document(TrustedOperation::SearchFolder),
             json!({
                 "query": query,
                 "first": first,
@@ -1003,7 +721,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetGroups,
-            QUERY_GET_GROUPS,
+            trusted_operation_document(TrustedOperation::GetGroups),
             json!({ "first": first }),
         )?;
         let edges = require_array_at(&payload, "/data/groups/edges", "groups not found")?;
@@ -1029,7 +747,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetFolders,
-            QUERY_GET_FOLDERS,
+            trusted_operation_document(TrustedOperation::GetFolders),
             json!({ "first": first }),
         )?;
         let edges = require_array_at(&payload, "/data/folders/edges", "folders not found")?;
@@ -1059,7 +777,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetNotes,
-            QUERY_GET_NOTES,
+            trusted_operation_document(TrustedOperation::GetNotes),
             json!({
                 "folderId": folder_id,
                 "first": first,
@@ -1094,7 +812,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetNoteFromPath,
-            QUERY_GET_NOTE_FROM_PATH,
+            trusted_operation_document(TrustedOperation::GetNoteFromPath),
             json!({
                 "path": path,
                 "first": first,
@@ -1118,7 +836,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetFolder,
-            QUERY_GET_FOLDER,
+            trusted_operation_document(TrustedOperation::GetFolder),
             json!({
                 "id": id,
                 "first": first,
@@ -1142,7 +860,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetFolderFromPath,
-            QUERY_GET_FOLDER_FROM_PATH,
+            trusted_operation_document(TrustedOperation::GetFolderFromPath),
             json!({
                 "path": path,
                 "first": first,
@@ -1172,7 +890,7 @@ impl KibelClient {
         let first = normalize_first(input.first)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::GetFeedSections,
-            QUERY_GET_FEED_SECTIONS,
+            trusted_operation_document(TrustedOperation::GetFeedSections),
             json!({
                 "kind": kind,
                 "groupId": group_id,
@@ -1209,7 +927,7 @@ impl KibelClient {
         }
         let payload = self.request_trusted_graphql(
             TrustedOperation::CreateComment,
-            MUTATION_CREATE_COMMENT,
+            trusted_operation_document(TrustedOperation::CreateComment),
             json!({
                 "input": {
                     "content": content,
@@ -1247,7 +965,7 @@ impl KibelClient {
         }
         let payload = self.request_trusted_graphql(
             TrustedOperation::CreateCommentReply,
-            MUTATION_CREATE_COMMENT_REPLY,
+            trusted_operation_document(TrustedOperation::CreateCommentReply),
             json!({
                 "input": {
                     "content": content,
@@ -1285,7 +1003,7 @@ impl KibelClient {
         }
         let payload = self.request_trusted_graphql(
             TrustedOperation::CreateFolder,
-            MUTATION_CREATE_FOLDER,
+            trusted_operation_document(TrustedOperation::CreateFolder),
             json!({
                 "input": {
                     "folder": {
@@ -1321,7 +1039,7 @@ impl KibelClient {
         let to_folder = normalize_folder(&input.to_folder)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::MoveNoteToAnotherFolder,
-            MUTATION_MOVE_NOTE_TO_ANOTHER_FOLDER,
+            trusted_operation_document(TrustedOperation::MoveNoteToAnotherFolder),
             json!({
                 "input": {
                     "noteId": id,
@@ -1355,7 +1073,7 @@ impl KibelClient {
         let folder = normalize_folder(&input.folder)?;
         let payload = self.request_trusted_graphql(
             TrustedOperation::AttachNoteToFolder,
-            MUTATION_ATTACH_NOTE_TO_FOLDER,
+            trusted_operation_document(TrustedOperation::AttachNoteToFolder),
             json!({
                 "input": {
                     "noteId": id,
@@ -1932,20 +1650,6 @@ fn require_value_at(
     Ok(value)
 }
 
-fn parse_current_user_id(payload: &Value) -> Result<String, KibelClientError> {
-    let user = require_value_at(payload, "/data/currentUser", "current user not found")?;
-    let id = user
-        .get("id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| KibelClientError::Api {
-            code: "NOT_FOUND".to_string(),
-            message: "current user id not found".to_string(),
-        })?;
-    Ok(id.to_string())
-}
-
 fn build_search_note_variables(
     input: &SearchNoteInput,
     first: u32,
@@ -1990,6 +1694,9 @@ fn build_search_note_variables(
     }
     if let Some(value) = input.sort_by.as_deref().and_then(normalize_optional) {
         variables.insert("sortBy".to_string(), Value::String(value));
+    }
+    if let Some(value) = input.after.as_deref().and_then(normalize_optional) {
+        variables.insert("after".to_string(), Value::String(value));
     }
     Ok(variables)
 }
@@ -2278,11 +1985,11 @@ mod tests {
     use super::{
         build_search_note_variables, collect_name_set, endpoint_from_origin, extract_graphql_error,
         extract_root_field, is_persisted_query_not_found, is_persisted_query_not_supported,
-        load_schema_fixture_from_env, parse_create_note_at, parse_current_user_id,
-        resource_contract_upstream_commit, resource_contract_version, resource_contracts,
-        should_fallback_apq_status, should_skip_runtime_introspection, trusted_operation_contract,
+        load_schema_fixture_from_env, parse_create_note_at, resource_contract_upstream_commit,
+        resource_contract_version, resource_contracts, should_fallback_apq_status,
+        should_skip_runtime_introspection, trusted_operation_contract, trusted_operation_document,
         trusted_operations, validate_trusted_operation_request, CreateNoteInput, CreateNoteSchema,
-        KibelClient, SearchNoteInput, TrustedOperation, QUERY_GET_FOLDER, QUERY_NOTE_GET,
+        KibelClient, SearchNoteInput, TrustedOperation,
     };
     use serde_json::json;
     use tempfile::NamedTempFile;
@@ -2489,6 +2196,9 @@ mod tests {
         assert!(contracts
             .iter()
             .all(|item| item.graphql_file.starts_with("endpoint:")));
+        assert!(contracts
+            .iter()
+            .all(|item| !item.document.trim().is_empty()));
         assert_eq!(resource_contract_upstream_commit(), "");
     }
 
@@ -2520,7 +2230,7 @@ query AliasQuery($id: ID!) {
     fn trusted_operation_validation_rejects_missing_required_variable() {
         let error = validate_trusted_operation_request(
             TrustedOperation::GetNote,
-            QUERY_NOTE_GET,
+            trusted_operation_document(TrustedOperation::GetNote),
             &json!({}),
         )
         .expect_err("validation should fail");
@@ -2536,7 +2246,7 @@ query AliasQuery($id: ID!) {
     fn trusted_operation_validation_rejects_unsupported_variable() {
         let error = validate_trusted_operation_request(
             TrustedOperation::GetNote,
-            QUERY_NOTE_GET,
+            trusted_operation_document(TrustedOperation::GetNote),
             &json!({
                 "id": "N1",
                 "first": 16,
@@ -2555,7 +2265,7 @@ query AliasQuery($id: ID!) {
     fn trusted_operation_validation_allows_declared_non_root_variables() {
         validate_trusted_operation_request(
             TrustedOperation::GetFolder,
-            QUERY_GET_FOLDER,
+            trusted_operation_document(TrustedOperation::GetFolder),
             &json!({
                 "id": "F1",
                 "first": 1,
@@ -2568,7 +2278,7 @@ query AliasQuery($id: ID!) {
     fn trusted_operation_validation_rejects_root_field_mismatch() {
         let error = validate_trusted_operation_request(
             TrustedOperation::GetNote,
-            QUERY_GET_FOLDER,
+            trusted_operation_document(TrustedOperation::GetFolder),
             &json!({
                 "id": "F1",
                 "first": 1,
@@ -2654,6 +2364,7 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )
@@ -2677,12 +2388,36 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )
         .expect("variables should build");
         assert_eq!(variables.get("resources"), Some(&json!(["NOTE"])));
         assert_eq!(variables.get("userIds"), Some(&json!(["U1", "U2"])));
+    }
+
+    #[test]
+    fn build_search_note_variables_includes_after_cursor() {
+        let variables = build_search_note_variables(
+            &SearchNoteInput {
+                query: "x".to_string(),
+                resources: vec![],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(10),
+                after: Some(" cursor-1 ".to_string()),
+            },
+            10,
+        )
+        .expect("variables should build");
+        assert_eq!(variables.get("after"), Some(&json!("cursor-1")));
     }
 
     #[test]
@@ -2700,6 +2435,7 @@ query AliasQuery($id: ID!) {
                 is_archived: None,
                 sort_by: None,
                 first: Some(10),
+                after: None,
             },
             10,
         )
@@ -2716,30 +2452,48 @@ query AliasQuery($id: ID!) {
     }
 
     #[test]
-    fn parse_current_user_id_accepts_valid_payload() {
-        let id = parse_current_user_id(&json!({
-            "data": {
-                "currentUser": {
-                    "id": " U1 "
-                }
+    fn internal_bootstrap_query_rejects_mutation() {
+        let client =
+            KibelClient::new("https://example.kibe.la", "token").expect("client should construct");
+        let error = client
+            .run_internal_bootstrap_query(
+                "mutation Forbidden { currentUser { id } }",
+                json!({}),
+                1_000,
+                1024,
+                super::INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
+            )
+            .expect_err("mutation should be rejected");
+        match error {
+            super::KibelClientError::InputInvalid(message) => {
+                assert!(
+                    message.contains("does not allow mutation"),
+                    "unexpected message: {message}"
+                );
             }
-        }))
-        .expect("current user id should parse");
-        assert_eq!(id, "U1");
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
-    fn parse_current_user_id_rejects_missing_id() {
-        let error = parse_current_user_id(&json!({
-            "data": {
-                "currentUser": {}
-            }
-        }))
-        .expect_err("missing current user id should fail");
+    fn internal_bootstrap_query_rejects_unexpected_root_field() {
+        let client =
+            KibelClient::new("https://example.kibe.la", "token").expect("client should construct");
+        let error = client
+            .run_internal_bootstrap_query(
+                "query WrongRoot($id: ID!) { note(id: $id) { id } }",
+                json!({ "id": "N1" }),
+                1_000,
+                1024,
+                super::INTERNAL_BOOTSTRAP_ROOT_CURRENT_USER,
+            )
+            .expect_err("unexpected root field should be rejected");
         match error {
-            super::KibelClientError::Api { code, message } => {
-                assert_eq!(code, "NOT_FOUND");
-                assert_eq!(message, "current user id not found");
+            super::KibelClientError::InputInvalid(message) => {
+                assert!(
+                    message.contains("root field mismatch"),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("unexpected error: {other:?}"),
         }

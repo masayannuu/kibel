@@ -60,6 +60,12 @@ fn search_note_success() {
     let response = json!({
         "data": {
             "search": {
+                "pageInfo": {
+                    "hasNextPage": true,
+                    "hasPreviousPage": false,
+                    "startCursor": "cursor-0",
+                    "endCursor": "cursor-1"
+                },
                 "edges": [
                     {
                         "node": {
@@ -68,7 +74,7 @@ fn search_note_success() {
                             "url": "https://example.kibe.la/notes/N1",
                             "contentSummaryHtml": "summary",
                             "path": "/notes/N1",
-                            "author": {"account": "alice", "realName": "Alice"}
+                            "author": {"id": "U1", "account": "alice", "realName": "Alice"}
                         }
                     }
                 ]
@@ -83,6 +89,138 @@ fn search_note_success() {
     assert_eq!(
         payload["data"]["results"][0]["id"],
         Value::String("N1".to_string())
+    );
+    assert_eq!(
+        payload["data"]["page_info"]["endCursor"],
+        Value::String("cursor-1".to_string())
+    );
+}
+
+#[test]
+fn search_user_success() {
+    let response = json!({
+        "data": {
+            "search": {
+                "pageInfo": {
+                    "hasNextPage": false,
+                    "hasPreviousPage": false,
+                    "startCursor": Value::Null,
+                    "endCursor": Value::Null
+                },
+                "edges": [
+                    {
+                        "node": {
+                            "document": {"id": "N1"},
+                            "title": "hello",
+                            "url": "https://example.kibe.la/notes/N1",
+                            "contentSummaryHtml": "summary",
+                            "path": "/notes/N1",
+                            "author": {"id": "U1", "account": "alice", "realName": "Alice"}
+                        }
+                    },
+                    {
+                        "node": {
+                            "document": {"id": "N2"},
+                            "title": "hello2",
+                            "url": "https://example.kibe.la/notes/N2",
+                            "contentSummaryHtml": "summary2",
+                            "path": "/notes/N2",
+                            "author": {"id": "U1", "account": "alice", "realName": "Alice"}
+                        }
+                    }
+                ]
+            }
+        }
+    });
+    let (output, payload) =
+        run_kibel_json(&["search", "user", "--query", "hello"], &base_env(response));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["users"][0]["id"],
+        Value::String("U1".to_string())
+    );
+    assert_eq!(
+        payload["data"]["users"][0]["match_count"],
+        Value::Number(2.into())
+    );
+}
+
+#[test]
+fn search_note_mine_success() {
+    let response = json!({
+        "data": {
+            "currentUser": {
+                "latestNotes": {
+                    "edges": [
+                        {
+                            "node": {
+                                "id": "N-mine",
+                                "title": "my note",
+                                "url": "https://example.kibe.la/notes/N-mine",
+                                "updatedAt": "2026-02-25T00:00:00Z",
+                                "contentSummaryHtml": "summary",
+                                "path": "/notes/N-mine",
+                                "author": { "account": "me", "realName": "Me" }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+    let capture_path = isolated_capture_path();
+    let mut envs = base_env(response);
+    envs.push(("KIBEL_TEST_CAPTURE_REQUEST_PATH", capture_path.clone()));
+    let (output, payload) = run_kibel_json(&["search", "note", "--mine"], &envs);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["results"][0]["id"],
+        Value::String("N-mine".to_string())
+    );
+
+    let captured_raw = std::fs::read_to_string(&capture_path).expect("capture file should exist");
+    let captured =
+        serde_json::from_str::<Value>(&captured_raw).expect("captured request must be JSON");
+    assert!(captured["query"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("query GetCurrentUserLatestNotes"));
+    assert_eq!(captured["variables"]["first"], Value::Number(16.into()));
+}
+
+#[test]
+fn search_note_after_is_forwarded() {
+    let response = json!({
+        "data": {
+            "search": {
+                "pageInfo": {
+                    "hasNextPage": false,
+                    "hasPreviousPage": true,
+                    "startCursor": "cursor-1",
+                    "endCursor": "cursor-2"
+                },
+                "edges": []
+            }
+        }
+    });
+    let capture_path = isolated_capture_path();
+    let mut envs = base_env(response);
+    envs.push(("KIBEL_TEST_CAPTURE_REQUEST_PATH", capture_path.clone()));
+    let (output, payload) = run_kibel_json(
+        &["search", "note", "--query", "hello", "--after", "cursor-1"],
+        &envs,
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    let captured_raw = std::fs::read_to_string(&capture_path).expect("capture file should exist");
+    let captured =
+        serde_json::from_str::<Value>(&captured_raw).expect("captured request must be JSON");
+    assert_eq!(
+        captured["variables"]["after"],
+        Value::String("cursor-1".to_string())
     );
 }
 

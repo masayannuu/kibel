@@ -16,9 +16,9 @@ Build and maintain a production-grade Kibela CLI + reusable Rust client library.
 
 Schema contracts:
 
-- research/schema/create_note_contract.snapshot.json
-- research/schema/resource_contracts.endpoint.snapshot.json
-- research/schema/resource_contracts.snapshot.json
+- schema/contracts/create_note_contract.snapshot.json
+- schema/introspection/resource_contracts.endpoint.snapshot.json
+- schema/contracts/resource_contracts.snapshot.json
 
 Endpoint snapshot refresh:
 
@@ -26,7 +26,7 @@ Endpoint snapshot refresh:
 
 Primary schema source:
 
-- `research/schema/resource_contracts.endpoint.snapshot.json` (derived from Kibela GraphQL endpoint introspection via `kibel-tools`)
+- `schema/introspection/resource_contracts.endpoint.snapshot.json` (derived from Kibela GraphQL endpoint introspection via `kibel-tools`)
 
 Secondary external reference for behavior consistency:
 
@@ -47,9 +47,9 @@ Secondary external reference for behavior consistency:
   - `crates/kibel` (CLI binary)
   - `crates/kibel-tools` (contract maintenance CLI)
 - Contract source:
-  - create-note: `research/schema/create_note_contract.snapshot.json`
-  - all-resource endpoint snapshot: `research/schema/resource_contracts.endpoint.snapshot.json`
-  - all-resource derived snapshot: `research/schema/resource_contracts.snapshot.json`
+  - create-note: `schema/contracts/create_note_contract.snapshot.json`
+  - all-resource endpoint snapshot: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+  - all-resource derived snapshot: `schema/contracts/resource_contracts.snapshot.json`
 - Auth precedence must remain:
   1) stdin token (`--with-token`)
   2) env (`KIBELA_ACCESS_TOKEN`)

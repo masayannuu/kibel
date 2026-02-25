@@ -10,11 +10,11 @@ use kibel_client::{
     CreateCommentReplyInput, CreateFolderInput, CreateNoteFolderInput, CreateNoteInput,
     FeedSectionsInput, FolderLookupInput, GetNotesInput, KeychainTokenStore, KibelClient,
     MoveNoteToAnotherFolderInput, PageInput, PathLookupInput, ResolveTokenInput, SearchFolderInput,
-    SearchNoteInput, TokenStore, UpdateNoteInput,
+    SearchNoteInput, SearchNotePreset, TokenStore, UpdateNoteInput,
 };
 use rpassword::prompt_password;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -381,29 +381,26 @@ fn execute_search(
                 return Ok(CommandOutput {
                     data: json!({
                         "results": results,
+                        "page_info": Value::Null,
                         "meta": context_meta(&ctx),
                     }),
                     message: "search note completed".to_string(),
                 });
             }
 
-            let user_ids = command.user_ids.clone();
-            let results = ctx.client.search_note(&SearchNoteInput {
-                query: command.query.clone(),
-                resources: command.resources.clone(),
-                coediting: command.coediting,
-                updated: command.updated.clone(),
-                group_ids: command.group_ids.clone(),
-                user_ids,
-                folder_ids: command.folder_ids.clone(),
-                liker_ids: command.liker_ids.clone(),
-                is_archived: command.is_archived,
-                sort_by: command.sort_by.clone(),
-                first: command.first,
-            })?;
+            let search = resolve_search_note_request(cli, command)?;
+            let results = ctx.client.search_note_with_page_info(&search.input)?;
+            let result_items = results
+                .get("results")
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+            let page_info = results.get("pageInfo").cloned().unwrap_or(Value::Null);
             Ok(CommandOutput {
                 data: json!({
-                    "results": results,
+                    "results": result_items,
+                    "page_info": page_info,
+                    "preset": search.loaded_preset,
+                    "preset_saved": search.saved_preset,
                     "meta": context_meta(&ctx),
                 }),
                 message: "search note completed".to_string(),
@@ -422,11 +419,46 @@ fn execute_search(
                 message: "search folder completed".to_string(),
             })
         }
+        cli::SearchCommand::User(command) => {
+            let search = ctx.client.search_note_with_page_info(&SearchNoteInput {
+                query: command.query.clone(),
+                resources: Vec::new(),
+                coediting: None,
+                updated: None,
+                group_ids: command.group_ids.clone(),
+                user_ids: Vec::new(),
+                folder_ids: command.folder_ids.clone(),
+                liker_ids: Vec::new(),
+                is_archived: None,
+                sort_by: None,
+                first: command.first,
+                after: None,
+            })?;
+            let users = collect_users_from_search_results(
+                search
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            Ok(CommandOutput {
+                data: json!({
+                    "users": users,
+                    "page_info": search.get("pageInfo").cloned().unwrap_or(Value::Null),
+                    "meta": context_meta(&ctx),
+                }),
+                message: "search user completed".to_string(),
+            })
+        }
     }
 }
 
 fn search_note_mine_has_unsupported_filters(command: &cli::SearchNoteArgs) -> bool {
     !command.query.trim().is_empty()
+        || command
+            .after
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
         || !command.resources.is_empty()
         || command.coediting.is_some()
         || command.updated.is_some()
@@ -436,6 +468,198 @@ fn search_note_mine_has_unsupported_filters(command: &cli::SearchNoteArgs) -> bo
         || !command.liker_ids.is_empty()
         || command.is_archived.is_some()
         || command.sort_by.is_some()
+        || command
+            .preset
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || command
+            .save_preset
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+#[derive(Debug)]
+struct SearchNoteRequest {
+    input: SearchNoteInput,
+    loaded_preset: Option<String>,
+    saved_preset: Option<String>,
+}
+
+fn resolve_search_note_request(
+    cli: &cli::Cli,
+    command: &cli::SearchNoteArgs,
+) -> Result<SearchNoteRequest, CliError> {
+    let mut input = search_note_input_from_cli(command);
+    let mut loaded_preset = None;
+    let mut saved_preset = None;
+
+    let preset_name = command.preset.as_deref().and_then(normalize_owned);
+    let save_preset_name = command.save_preset.as_deref().and_then(normalize_owned);
+    if preset_name.is_none() && save_preset_name.is_none() {
+        return Ok(SearchNoteRequest {
+            input,
+            loaded_preset,
+            saved_preset,
+        });
+    }
+
+    let (config_path, mut config) = load_config(cli.config_path.clone())?;
+
+    if let Some(preset_name) = preset_name {
+        let preset = config.search_note_preset(&preset_name).ok_or_else(|| {
+            CliError::new(
+                ErrorCode::NotFound,
+                format!("search note preset not found: {preset_name}"),
+            )
+        })?;
+        input = merge_search_note_preset(preset, input);
+        loaded_preset = Some(preset_name);
+    }
+
+    if let Some(save_preset_name) = save_preset_name {
+        let preset = search_note_preset_from_input(&input);
+        if !config.set_search_note_preset(&save_preset_name, preset) {
+            return Err(CliError::new(
+                ErrorCode::InputInvalid,
+                "--save-preset requires non-empty preset name",
+            ));
+        }
+        config.save(&config_path)?;
+        saved_preset = Some(save_preset_name);
+    }
+
+    Ok(SearchNoteRequest {
+        input,
+        loaded_preset,
+        saved_preset,
+    })
+}
+
+fn search_note_input_from_cli(command: &cli::SearchNoteArgs) -> SearchNoteInput {
+    SearchNoteInput {
+        query: command.query.clone(),
+        resources: command.resources.clone(),
+        coediting: command.coediting,
+        updated: command.updated.clone(),
+        group_ids: command.group_ids.clone(),
+        user_ids: command.user_ids.clone(),
+        folder_ids: command.folder_ids.clone(),
+        liker_ids: command.liker_ids.clone(),
+        is_archived: command.is_archived,
+        sort_by: command.sort_by.clone(),
+        first: command.first,
+        after: command.after.clone(),
+    }
+}
+
+fn merge_search_note_preset(
+    preset: &SearchNotePreset,
+    cli_input: SearchNoteInput,
+) -> SearchNoteInput {
+    SearchNoteInput {
+        query: if cli_input.query.trim().is_empty() {
+            preset.query.clone()
+        } else {
+            cli_input.query
+        },
+        resources: if cli_input.resources.is_empty() {
+            preset.resources.clone()
+        } else {
+            cli_input.resources
+        },
+        coediting: cli_input.coediting.or(preset.coediting),
+        updated: cli_input.updated.or_else(|| preset.updated.clone()),
+        group_ids: if cli_input.group_ids.is_empty() {
+            preset.group_ids.clone()
+        } else {
+            cli_input.group_ids
+        },
+        user_ids: if cli_input.user_ids.is_empty() {
+            preset.user_ids.clone()
+        } else {
+            cli_input.user_ids
+        },
+        folder_ids: if cli_input.folder_ids.is_empty() {
+            preset.folder_ids.clone()
+        } else {
+            cli_input.folder_ids
+        },
+        liker_ids: if cli_input.liker_ids.is_empty() {
+            preset.liker_ids.clone()
+        } else {
+            cli_input.liker_ids
+        },
+        is_archived: cli_input.is_archived.or(preset.is_archived),
+        sort_by: cli_input.sort_by.or_else(|| preset.sort_by.clone()),
+        first: cli_input.first.or(preset.first),
+        after: cli_input.after.or_else(|| preset.after.clone()),
+    }
+}
+
+fn search_note_preset_from_input(input: &SearchNoteInput) -> SearchNotePreset {
+    SearchNotePreset {
+        query: input.query.clone(),
+        resources: input.resources.clone(),
+        coediting: input.coediting,
+        updated: input.updated.clone(),
+        group_ids: input.group_ids.clone(),
+        user_ids: input.user_ids.clone(),
+        folder_ids: input.folder_ids.clone(),
+        liker_ids: input.liker_ids.clone(),
+        is_archived: input.is_archived,
+        sort_by: input.sort_by.clone(),
+        first: input.first,
+        after: input.after.clone(),
+    }
+}
+
+fn collect_users_from_search_results(results: Vec<Value>) -> Value {
+    let mut users = HashMap::<String, (Value, u32)>::new();
+    for item in results {
+        let author = item.get("author").cloned().unwrap_or(Value::Null);
+        let id = author.get("id").cloned().unwrap_or(Value::Null);
+        let account = author.get("account").cloned().unwrap_or(Value::Null);
+        let real_name = author.get("realName").cloned().unwrap_or(Value::Null);
+        let key = if let Some(value) = id.as_str() {
+            format!("id:{value}")
+        } else if let Some(value) = account.as_str() {
+            format!("account:{value}")
+        } else if let Some(value) = real_name.as_str() {
+            format!("realName:{value}")
+        } else {
+            continue;
+        };
+
+        let entry = users.entry(key).or_insert_with(|| {
+            (
+                json!({
+                    "id": id,
+                    "account": account,
+                    "real_name": real_name,
+                    "match_count": 0u32,
+                }),
+                0u32,
+            )
+        });
+        entry.1 = entry.1.saturating_add(1);
+        if let Some(count) = entry.0.get_mut("match_count") {
+            *count = json!(entry.1);
+        }
+    }
+
+    let mut values = users
+        .into_values()
+        .map(|(value, _)| value)
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| {
+        let left_count = left.get("match_count").and_then(Value::as_u64).unwrap_or(0);
+        let right_count = right
+            .get("match_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        right_count.cmp(&left_count)
+    });
+    Value::Array(values)
 }
 
 fn execute_group(
@@ -657,6 +881,36 @@ fn execute_note(
                     "meta": context_meta(&ctx),
                 }),
                 message: "note get completed".to_string(),
+            })
+        }
+        cli::NoteCommand::GetMany(command) => {
+            let ids = command
+                .ids
+                .iter()
+                .filter_map(|id| normalize_owned(id))
+                .collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Err(CliError::new(
+                    ErrorCode::InputInvalid,
+                    "at least one --id is required for note get-many",
+                ));
+            }
+            let mut notes = Vec::with_capacity(ids.len());
+            for id in ids {
+                let note = ctx.client.get_note(&id)?;
+                notes.push(json!({
+                    "id": note.id,
+                    "title": note.title,
+                    "content": note.content,
+                }));
+            }
+
+            Ok(CommandOutput {
+                data: json!({
+                    "notes": notes,
+                    "meta": context_meta(&ctx),
+                }),
+                message: "note get-many completed".to_string(),
             })
         }
         cli::NoteCommand::GetFromPath(command) => {
@@ -1583,11 +1837,13 @@ mod tests {
     use super::{
         analyze_query_shape, build_graphql_guardrails, detect_graphql_operation_kind,
         enforce_graphql_guardrails, extract_mutation_root_fields, infer_team_from_origin,
-        kibela_access_token_settings_url, normalize_origin_owned, resolve_graphql_variables,
-        search_note_mine_has_unsupported_filters, token_store_lookup_subjects,
-        trusted_mutation_root_fields, GraphqlGuardrails, GraphqlOperationKind,
+        kibela_access_token_settings_url, merge_search_note_preset, normalize_origin_owned,
+        resolve_graphql_variables, search_note_mine_has_unsupported_filters,
+        search_note_preset_from_input, token_store_lookup_subjects, trusted_mutation_root_fields,
+        GraphqlGuardrails, GraphqlOperationKind,
     };
     use crate::cli;
+    use kibel_client::{SearchNoteInput, SearchNotePreset};
     use serde_json::json;
 
     fn graphql_run_args(query: &str) -> cli::GraphqlRunArgs {
@@ -1726,6 +1982,7 @@ mod tests {
     fn mine_search_accepts_default_shape_only() {
         let command = cli::SearchNoteArgs {
             query: String::new(),
+            after: None,
             resources: vec![],
             coediting: None,
             updated: None,
@@ -1737,6 +1994,8 @@ mod tests {
             is_archived: None,
             sort_by: None,
             first: Some(10),
+            preset: None,
+            save_preset: None,
         };
         assert!(!search_note_mine_has_unsupported_filters(&command));
     }
@@ -1745,6 +2004,7 @@ mod tests {
     fn mine_search_rejects_additional_filters() {
         let command = cli::SearchNoteArgs {
             query: String::new(),
+            after: None,
             resources: vec!["note".to_string()],
             coediting: None,
             updated: None,
@@ -1756,8 +2016,66 @@ mod tests {
             is_archived: None,
             sort_by: None,
             first: Some(10),
+            preset: None,
+            save_preset: None,
         };
         assert!(search_note_mine_has_unsupported_filters(&command));
+    }
+
+    #[test]
+    fn merge_search_note_preset_keeps_cli_overrides() {
+        let preset = SearchNotePreset {
+            query: "preset".to_string(),
+            resources: vec!["NOTE".to_string()],
+            group_ids: vec!["G-preset".to_string()],
+            first: Some(10),
+            after: Some("cursor-preset".to_string()),
+            ..SearchNotePreset::default()
+        };
+        let merged = merge_search_note_preset(
+            &preset,
+            SearchNoteInput {
+                query: "cli".to_string(),
+                resources: vec!["COMMENT".to_string()],
+                coediting: None,
+                updated: None,
+                group_ids: vec![],
+                user_ids: vec![],
+                folder_ids: vec![],
+                liker_ids: vec![],
+                is_archived: None,
+                sort_by: None,
+                first: Some(5),
+                after: Some("cursor-cli".to_string()),
+            },
+        );
+        assert_eq!(merged.query, "cli");
+        assert_eq!(merged.resources, vec!["COMMENT".to_string()]);
+        assert_eq!(merged.first, Some(5));
+        assert_eq!(merged.after.as_deref(), Some("cursor-cli"));
+        assert_eq!(merged.group_ids, vec!["G-preset".to_string()]);
+    }
+
+    #[test]
+    fn search_note_preset_from_input_round_trip() {
+        let input = SearchNoteInput {
+            query: "onboarding".to_string(),
+            resources: vec!["NOTE".to_string()],
+            coediting: Some(true),
+            updated: Some("LAST_7_DAYS".to_string()),
+            group_ids: vec!["G1".to_string()],
+            user_ids: vec!["U1".to_string()],
+            folder_ids: vec!["F1".to_string()],
+            liker_ids: vec!["U2".to_string()],
+            is_archived: Some(false),
+            sort_by: Some("UPDATED_AT_DESC".to_string()),
+            first: Some(16),
+            after: Some("cursor-1".to_string()),
+        };
+        let preset = search_note_preset_from_input(&input);
+        assert_eq!(preset.query, "onboarding");
+        assert_eq!(preset.resources, vec!["NOTE"]);
+        assert_eq!(preset.after.as_deref(), Some("cursor-1"));
     }
 
     #[test]

@@ -6,10 +6,10 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 ## Current Model
 
 ### Source of truth
-- Endpoint schema contract source: `research/schema/resource_contracts.endpoint.snapshot.json`
-- Derived contract snapshot: `research/schema/resource_contracts.snapshot.json`
+- Endpoint schema contract source: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+- Derived contract snapshot: `schema/contracts/resource_contracts.snapshot.json`
 - Generated contract module: `crates/kibel-client/src/generated_resource_contracts.rs`
-- createNote contract snapshot: `research/schema/create_note_contract.snapshot.json`
+- createNote contract snapshot: `schema/contracts/create_note_contract.snapshot.json`
 - createNote generated module: `crates/kibel-client/src/generated_create_note_contract.rs`
 
 ### Current strengths
