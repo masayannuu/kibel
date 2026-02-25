@@ -1,0 +1,10 @@
+mutation CreateNote($input: CreateNoteInput!) {
+  createNote(input: $input) {
+    clientMutationId
+    note {
+      id
+      title
+      content
+    }
+  }
+}

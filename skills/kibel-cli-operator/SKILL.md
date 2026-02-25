@@ -23,20 +23,54 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   exit 127
 fi
 
-"${KBIN}" --json auth status
+AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+  echo "auth status command failed" >&2
+  exit 3
+}
+echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
 "${KBIN}" --help
 ```
 
 Proceed only when auth status returns `ok: true`.
 
+If auth is not ready:
+
+```bash
+# interactive
+"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+
+# non-interactive (CI/temporary, `--with-token` reads stdin)
+printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
+  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+```
+
+Token issue page:
+
+```text
+https://<tenant>.kibe.la/settings/access_tokens
+```
+
+Tenant placeholder rule:
+
+- Kibela origin `https://<tenant>.kibe.la` の `<tenant>` を使う。
+- 例: `https://spikestudio.kibe.la` -> `team=spikestudio`
+
+Security note:
+
+- ローカル運用は interactive login を優先（keychain/config に保存）。
+- `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
+
 ## Command family guidance
 
 - Discovery/read:
-  - `search note`, `search folder`
+  - `search note`, `search folder`, `search user`
   - `group list`
   - `folder list/get/get-from-path/notes`
   - `feed sections`
-  - `note get/get-from-path`
+  - `note get/get-many/get-from-path`
 - Update/write (explicit user intent required):
   - `note create/update/move-to-folder/attach-to-folder`
   - `comment create/reply`
@@ -55,8 +89,9 @@ Proceed only when auth status returns `ok: true`.
 
 1. Confirm objective and constraints (read-only / write-allowed).
 2. Use structured CLI commands first.
-3. Use `graphql run` only when structured command is missing.
-4. Return output with:
+3. For search loops, use cursor pagination (`search note --after`) and optional presets (`--save-preset` / `--preset`) before falling back to ad-hoc GraphQL.
+4. Use `graphql run` only when structured command is missing.
+5. Return output with:
    - command(s) executed
    - key results
    - unknowns and next action

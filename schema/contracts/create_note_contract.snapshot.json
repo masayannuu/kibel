@@ -1,10 +1,5 @@
 {
-  "schema_contract_version": 1,
-  "captured_at": "2026-02-23T06:21:53Z",
-  "source": {
-    "origin": "https://example-team.kibe.la",
-    "artifact": "artifacts/schema-live/create-note-schema-detail-20260223T062153Z.json"
-  },
+  "captured_at": "2026-02-23T09:06:10Z",
   "create_note_input_fields": [
     "clientMutationId",
     "title",
@@ -16,15 +11,15 @@
     "authorId",
     "publishedAt"
   ],
-  "create_note_payload_fields": [
-    "clientMutationId",
-    "note"
-  ],
   "create_note_note_projection_fields": [
     "id",
     "title",
     "content",
     "url"
+  ],
+  "create_note_payload_fields": [
+    "clientMutationId",
+    "note"
   ],
   "required_input_fields": [
     "title",
@@ -34,5 +29,10 @@
   ],
   "required_payload_fields": [
     "note"
-  ]
+  ],
+  "schema_contract_version": 1,
+  "source": {
+    "artifact": "endpoint-snapshot:https://example-team.kibe.la/api/v1",
+    "origin": "https://example-team.kibe.la"
+  }
 }

@@ -3,24 +3,34 @@
 ## Auth/config
 
 - `kibel --json auth status`
-- `kibel --json auth login --team <team> --with-token`
+- `kibel --json auth login --origin https://<team>.kibe.la --team <team> --with-token`
 - `kibel --json config profiles`
 - `kibel --json config set team <team>`
 
 ## Search
 
 - `kibel --json search note --query "<query>" --first 16`
+- `kibel --json search note --query "<query>" --after "<cursor>" --first 16`
+- `kibel --json search note --query "<query>" --save-preset "<name>"`
+- `kibel --json search note --preset "<name>"`
 - `kibel --json search note --mine --first 10`
 - `kibel --json search folder --query "<query>" --first 16`
+- `kibel --json search user --query "<query>" --first 16`
 
 ## Note
 
 - `kibel --json note get --id <NOTE_ID>`
+- `kibel --json note get-many --id <NOTE_ID> --id <NOTE_ID>`
 - `kibel --json note get-from-path --path /notes/<number>`
 - `kibel --json note create --title "<t>" --content "<c>" --group-id <GROUP_ID> --draft`
 - `kibel --json note update --id <NOTE_ID> --base-content "<old>" --new-content "<new>"`
 - `kibel --json note move-to-folder --id <NOTE_ID> --from-folder <GROUP_ID:NAME> --to-folder <GROUP_ID:NAME>`
 - `kibel --json note attach-to-folder --id <NOTE_ID> --folder <GROUP_ID:NAME>`
+
+Folder reference format:
+
+- `<GROUP_ID:NAME>` (例: `1:Engineering`)
+- `GROUP_ID` は `group list` で確認する。
 
 ## Folder/group/feed
 

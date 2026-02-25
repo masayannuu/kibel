@@ -51,3 +51,8 @@ Treat each `SKILL.md` as an execution playbook and keep commands unchanged.
 - Do not run write commands in search/RAG flows unless explicitly requested.
 - Keep `graphql run` in query-only mode for these skills.
 - Preserve machine-readable outputs (`--json`) for reproducibility.
+- If `auth status` is not ready, recover with `auth login --origin ... --team ...` before any retrieval flow.
+- Parse `auth status` JSON and fail closed (`exit 3`) when `.ok != true`.
+- Use tenant from origin consistently (`https://<tenant>.kibe.la` -> `--team <tenant>`).
+- Prefer interactive login for local use; keep env/stdin token injection for CI or temporary runs.
+- Treat `--user-id` as optional in retrieval loops; if unknown, narrow by group/folder first and verify via `note get`.
