@@ -9,6 +9,9 @@
   - `crates/kibel-client/src/generated_create_note_contract.rs`
   - `crates/kibel-client/src/generated_resource_contracts.rs`
     - includes trusted operation documents (`document`) used by `kibel-client`
+- breakglass templates (manual fallback assets):
+  - `crates/kibel-tools/operation_documents/*.graphql`
+  - 通常フロー（strict）では使用しない。`document` は endpoint snapshot から自動生成される。
 
 ## Update procedure
 
@@ -73,6 +76,10 @@ Breakglass only:
 # temporary fallback for historical snapshots without `document`
 cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass
 ```
+
+補足:
+- `crates/kibel-tools/operation_documents/*.graphql` は breakglass 用の手動テンプレート。
+- 通常運用（strict）では endpoint introspection snapshot 起点の自動生成 `document` を唯一の実行契約として扱う。
 
 ## Drift policy
 

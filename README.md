@@ -253,6 +253,10 @@ All-resource contract:
 - compatibility diff (machine-readable): `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
 - breakglass (temporary only): `cargo run -p kibel-tools -- resource-contract check --document-fallback-mode breakglass`
 
+Notes:
+- 通常運用（strict）では、trusted operation の `document` は endpoint introspection snapshot から自動生成されます。
+- `crates/kibel-tools/operation_documents/*.graphql` は breakglass 用の手動 fallback テンプレートです（通常フローでは不使用）。
+
 ## Development Quality Gates
 
 ```bash
