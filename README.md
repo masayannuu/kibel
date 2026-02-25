@@ -38,7 +38,7 @@ Kibela operations are often needed in scripts, CI, and internal tooling.
 
 Treat the following as canonical for automation integrations:
 
-- `docs/cli-interface.md`: official CLI/API contract (`--json`, errors, exit codes, safety boundary).
+- `docs/cli-interface.md`: official CLI/API contract (default JSON, errors, exit codes, safety boundary).
 - `docs/agent-skills.md`: official agent workflows for high-precision retrieval and RAG.
 
 ## Quick Start (CLI)
@@ -102,16 +102,16 @@ export KIBELA_ACCESS_TOKEN="<your-token>"
 ### 5. Run commands
 
 ```bash
-kibel --json auth status
-kibel --json search note --query onboarding --first 16
-kibel --json search note --query onboarding --after <cursor> --first 16
-kibel --json search user --query onboarding --first 10
-kibel --json search note --query onboarding --save-preset onboarding
-kibel --json search note --preset onboarding
-kibel --json search note --mine --first 10
-kibel --json note get --id N1
-kibel --json note get-many --id N1 --id N2
-kibel --json graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
+kibel auth status
+kibel search note --query onboarding --first 16
+kibel search note --query onboarding --after <cursor> --first 16
+kibel search user --query onboarding --first 10
+kibel search note --query onboarding --save-preset onboarding
+kibel search note --preset onboarding
+kibel search note --mine --first 10
+kibel note get --id N1
+kibel note get-many --id N1 --id N2
+kibel graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
 `search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。

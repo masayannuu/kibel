@@ -1,7 +1,7 @@
 ---
 name: kibel-agentic-rag
 description: Use this skill for evidence-first RAG over Kibela using kibel CLI (retrieve -> verify -> cite).
-allowed-tools: Bash(kibel:--json auth status),Bash(kibel:--json auth login),Bash(kibel:--json search note),Bash(kibel:--json search user),Bash(kibel:--json note get),Bash(kibel:--json note get-many),Bash(kibel:--json note get-from-path),Bash(rg:*),Bash(jq:*)
+allowed-tools: Bash(kibel:auth status),Bash(kibel:auth login),Bash(kibel:search note),Bash(kibel:search user),Bash(kibel:note get),Bash(kibel:note get-many),Bash(kibel:note get-from-path),Bash(rg:*),Bash(python3:*)
 ---
 
 # kibel Agentic RAG
@@ -26,29 +26,33 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   echo "kibel not found in PATH (or set KIBEL_BIN)" >&2
   exit 127
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found in PATH" >&2
+  exit 127
+fi
 
-AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+AUTH_JSON="$("${KBIN}" auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data", {}).get("logged_in") is True else 1)' || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
 
-SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)" || {
+SMOKE_JSON="$("${KBIN}" search note --query "test" --first 1 2>/dev/null)" || {
   echo "search note smoke failed" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d.get("data", {}).get("results"), list) else 1)' || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }
@@ -58,11 +62,11 @@ If auth is not ready, recover before retrieval:
 
 ```bash
 # interactive
-"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+"${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 
 # non-interactive (CI/temporary, `--with-token` reads stdin)
 printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
-  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+  "${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
 ```
 
 Token issue page:
@@ -156,7 +160,7 @@ Ranking priority:
 Run broad queries using planner candidates:
 
 ```bash
-"${KBIN}" --json search note --query "<topic>" --first "${FIRST:-16}"
+"${KBIN}" search note --query "<topic>" --first "${FIRST:-16}"
 ```
 
 Candidate loop example:
@@ -168,7 +172,7 @@ declare -a CANDIDATES=(
   "<scope_or_time_focused_query>"
 )
 for q in "${CANDIDATES[@]}"; do
-  "${KBIN}" --json search note --query "${q}" --first "${FIRST:-16}"
+  "${KBIN}" search note --query "${q}" --first "${FIRST:-16}"
 done
 ```
 
@@ -181,20 +185,20 @@ Language fallback rule:
 When result volume is high, paginate forward with cursor:
 
 ```bash
-"${KBIN}" --json search note --query "<topic>" --after "<cursor>" --first "${FIRST:-16}"
+"${KBIN}" search note --query "<topic>" --after "<cursor>" --first "${FIRST:-16}"
 ```
 
 Optional reusable preset:
 
 ```bash
-"${KBIN}" --json search note --query "<topic>" --save-preset "<name>"
-"${KBIN}" --json search note --preset "<name>"
+"${KBIN}" search note --query "<topic>" --save-preset "<name>"
+"${KBIN}" search note --preset "<name>"
 ```
 
 Optionally include latest self context:
 
 ```bash
-"${KBIN}" --json search note --mine --first 10
+"${KBIN}" search note --mine --first 10
 ```
 
 ### Pass 2: Precision
@@ -202,7 +206,7 @@ Optionally include latest self context:
 Narrow with filters where known:
 
 ```bash
-"${KBIN}" --json search note \
+"${KBIN}" search note \
   --query "<topic>" \
   --user-id "<USER_ID>" \
   --group-id "<GROUP_ID>" \
@@ -216,7 +220,7 @@ Rules:
 - When author precision is required, discover author candidates first:
 
 ```bash
-"${KBIN}" --json search user --query "<topic>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
+"${KBIN}" search user --query "<topic>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
 ```
 
 Then inspect returned note metadata (`note get`) to pin the correct author ID.
@@ -227,14 +231,14 @@ Then inspect returned note metadata (`note get`) to pin the correct author ID.
 Fetch full note bodies for top candidates:
 
 ```bash
-"${KBIN}" --json note get --id "<NOTE_ID>"
-"${KBIN}" --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
+"${KBIN}" note get --id "<NOTE_ID>"
+"${KBIN}" note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 ```
 
 or:
 
 ```bash
-"${KBIN}" --json note get-from-path --path "/notes/<number>"
+"${KBIN}" note get-from-path --path "/notes/<number>"
 ```
 
 CoVe-style minimum rule:

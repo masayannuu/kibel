@@ -74,7 +74,7 @@ Treat each `SKILL.md` as an execution playbook and keep commands unchanged.
 - Do not run write commands in search/RAG flows unless explicitly requested.
 - Read-only skill metadata is checked by `scripts/check_skill_safety.sh` in CI.
 - Keep `graphql run` in query-only mode for these skills.
-- Preserve machine-readable outputs (`--json`) for reproducibility.
+- Machine-readable JSON is default; avoid `--text` in reproducible skill flows.
 - If `auth status` is not ready, recover with `auth login --origin ... --team ...` before any retrieval flow.
 - Parse `auth status` JSON and fail closed (`exit 3`) when `.ok != true`.
 - Use tenant from origin consistently (`https://<tenant>.kibe.la` -> `--team <tenant>`).

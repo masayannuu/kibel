@@ -47,7 +47,7 @@ Define the target architecture for `kibel` as a high-quality GraphQL CLI/client 
 - Mutation root-field allowlist derived from trusted resource contracts (enabled).
 - Trusted query transport uses persisted-hash GET with safe POST fallback.
 - Error contract parity with built-in commands:
-  - `--json` failures must always produce normalized `error.code`.
+  - JSON failures must always produce normalized `error.code`.
 
 ### Proposed baseline defaults (phase-2)
 - Request timeout: 15s (hard cap: 60s).

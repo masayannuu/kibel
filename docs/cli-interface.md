@@ -10,7 +10,7 @@ Current phase is pre-public hardening: interfaces may change when quality/securi
 `kibel` has four official interface layers.
 
 1. Command interface: command groups, subcommands, and options.
-2. Machine interface: `--json` envelope, `error.code`, and process exit code.
+2. Machine interface: default JSON envelope (`--text` override), `error.code`, and process exit code.
 3. Config/auth interface: token/origin/team resolution behavior.
 4. Safety interface: operation allowlist and explicit unsupported scope.
 
@@ -93,7 +93,8 @@ Ad-hoc lane:
 
 ## JSON Envelope Contract
 
-All command groups support `--json` and return:
+All command groups return JSON by default.
+`--text` opts into human-readable output, and `--json` can still be used explicitly.
 
 Success:
 

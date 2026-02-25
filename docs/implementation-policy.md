@@ -9,12 +9,12 @@
 ## Non-negotiable invariants
 
 - 認証優先順位は固定: stdin (`--with-token`) > env (`KIBELA_ACCESS_TOKEN`) > keychain > config。
-- すべての失敗は `--json` モードで機械判読可能な `error.code` に正規化する。
+- すべての失敗はデフォルトJSON出力で機械判読可能な `error.code` に正規化する（`--text` は人間向け表示専用）。
 - 公式CLI I/F契約は `docs/cli-interface.md` を一次ソースとして維持する。
 - all-resource 契約は endpoint introspection snapshot を一次ソースにする。
 - 新規リソース追加時は `unit + stub E2E` を同時に追加する。
 - all-resource E2E は契約snapshot起点の動的GraphQL stub server検証を維持する。
-- free-query 系コマンドを導入する場合も `--json` 失敗時の `error.code` 正規化を必須とする。
+- free-query 系コマンドを導入する場合も JSON 失敗時の `error.code` 正規化を必須とする。
 - free-query 系コマンドは timeout/response size/depth-cost などの実行境界を必須で持つ。
 - trusted query transport は persisted-hash GET + safe POST fallback を採用し、untrusted lane は POST維持で運用する。
 - CLI 機能スコープは明示的に制限し、破壊的/管理者系操作（delete、member add/remove、organization/group setting 変更）は現時点で提供しない。

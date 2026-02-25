@@ -28,6 +28,11 @@ for file in "${readonly_skills[@]}"; do
     fail=1
   fi
 
+  if grep -Fq 'Bash(jq:*)' "${file}"; then
+    echo "forbidden jq dependency in read-only skill: ${file}" >&2
+    fail=1
+  fi
+
   # Read-only skill must not advertise known write/mutation entrypoints.
   if grep -Eq 'kibel:[^)]*(note create|note update|note move-to-folder|note attach-to-folder|comment create|comment reply|folder create|graphql run --allow-mutation)' "${file}"; then
     echo "forbidden write/mutation command in allowed-tools: ${file}" >&2

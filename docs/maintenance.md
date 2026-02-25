@@ -7,7 +7,7 @@
    - `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 2. `kibel-client` に入力構造体・実行メソッドを追加。
 3. `kibel` に CLI サブコマンドを追加。
-4. `--json` の出力形を固定化。
+4. デフォルトJSON出力の envelope 形を固定化（`--text` は人間向け表示専用）。
 5. unit test + stub E2E を追加。
 6. all-resource contract snapshot/codegen を同期。
    - `cargo run -p kibel-tools -- resource-contract write`

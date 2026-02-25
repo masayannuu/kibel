@@ -27,78 +27,133 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   exit 127
 fi
 
-if ! command -v jq >/dev/null 2>&1 || ! jq --version >/dev/null 2>&1; then
-  echo "jq is required for this template" >&2
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required for this template" >&2
   exit 127
 fi
 
-AUTH_JSON="$("${KBIN}" --json auth status)"
-printf '%s' "${AUTH_JSON}" | jq -e '.ok == true and .data.logged_in == true' >/dev/null
+python3 - "${KBIN}" "${PROFILE}" "${FIRST}" "${QUERY}" "$@" <<'PY'
+import json
+import subprocess
+import sys
 
-tmp_items="$(mktemp)"
-tmp_latency="$(mktemp)"
-trap 'rm -f "${tmp_items}" "${tmp_latency}"' EXIT
+kbin = sys.argv[1]
+profile = sys.argv[2]
+first = int(sys.argv[3])
+query = sys.argv[4]
+extra_candidates = sys.argv[5:]
 
-case "${PROFILE}" in
-  fast) MAX_CANDIDATES=2; MAX_CLI_CALLS=8 ;;
-  deep) MAX_CANDIDATES=7; MAX_CLI_CALLS=28 ;;
-  *) PROFILE="balanced"; MAX_CANDIDATES=4; MAX_CLI_CALLS=16 ;;
-esac
+profiles = {
+    "fast": {"max_candidates": 2, "max_cli_calls": 8},
+    "balanced": {"max_candidates": 4, "max_cli_calls": 16},
+    "deep": {"max_candidates": 7, "max_cli_calls": 28},
+}
+if profile not in profiles:
+    profile = "balanced"
+limits = profiles[profile]
 
-# Anchor query is always included first.
-CANDIDATES=("${QUERY}")
-for q in "$@"; do
-  CANDIDATES+=("${q}")
-done
+candidates = [query, *extra_candidates]
+if len(candidates) > limits["max_candidates"]:
+    print(
+        f"candidate budget exceeded for profile={profile}: {len(candidates)} > {limits['max_candidates']}",
+        file=sys.stderr,
+    )
+    raise SystemExit(4)
 
-if [[ "${#CANDIDATES[@]}" -gt "${MAX_CANDIDATES}" ]]; then
-  echo "candidate budget exceeded for profile=${PROFILE}: ${#CANDIDATES[@]} > ${MAX_CANDIDATES}" >&2
-  exit 4
-fi
 
-cli_calls=0
-printf 'candidate_count=%s\n' "${#CANDIDATES[@]}"
-printf 'profile=%s\n' "${PROFILE}"
-printf 'max_cli_calls=%s\n' "${MAX_CLI_CALLS}"
+def run_kibel(args):
+    proc = subprocess.run([kbin, *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        elif proc.stdout:
+            sys.stderr.write(proc.stdout)
+        raise SystemExit(proc.returncode)
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        print(f"invalid JSON output from kibel: {exc}", file=sys.stderr)
+        raise SystemExit(10)
 
-for cand in "${CANDIDATES[@]}"; do
-  cli_calls=$((cli_calls + 1))
-  if [[ "${cli_calls}" -gt "${MAX_CLI_CALLS}" ]]; then
-    echo "cli call budget exceeded for profile=${PROFILE}: ${cli_calls} > ${MAX_CLI_CALLS}" >&2
-    exit 4
-  fi
 
-  RESULT_JSON="$("${KBIN}" --json search note --query "${cand}" --first "${FIRST}")"
-  printf '%s' "${RESULT_JSON}" | jq -e '.ok == true and (.data.results | type) == "array"' >/dev/null
+auth = run_kibel(["auth", "status"])
+if not (auth.get("ok") is True and auth.get("data", {}).get("logged_in") is True):
+    print("auth is not ready; run auth login first", file=sys.stderr)
+    raise SystemExit(3)
 
-  COUNT="$(printf '%s' "${RESULT_JSON}" | jq '.data.results | length')"
-  CURSOR="$(printf '%s' "${RESULT_JSON}" | jq -r '.data.page_info.endCursor // empty')"
-  ELAPSED_MS="$(printf '%s' "${RESULT_JSON}" | jq '.meta.elapsed_ms // 0')"
+items = []
+latencies = []
 
-  printf 'candidate=%s\n' "${cand}"
-  printf 'result_count=%s\n' "${COUNT}"
-  printf 'elapsed_ms=%s\n' "${ELAPSED_MS}"
-  if [[ -n "${CURSOR}" ]]; then
-    printf 'end_cursor=%s\n' "${CURSOR}"
-  fi
+print(f"candidate_count={len(candidates)}")
+print(f"profile={profile}")
+print(f"max_cli_calls={limits['max_cli_calls']}")
 
-  printf '%s' "${RESULT_JSON}" \
-    | jq -c --arg q "${cand}" '.data.results[]? | {candidate:$q,title,path,url}' \
-    >> "${tmp_items}"
-  printf '%s\n' "${ELAPSED_MS}" >> "${tmp_latency}"
+for idx, cand in enumerate(candidates, start=1):
+    if idx > limits["max_cli_calls"]:
+        print(
+            f"cli call budget exceeded for profile={profile}: {idx} > {limits['max_cli_calls']}",
+            file=sys.stderr,
+        )
+        raise SystemExit(4)
 
-done
+    payload = run_kibel(["search", "note", "--query", cand, "--first", str(first)])
+    results = payload.get("data", {}).get("results")
+    if not (payload.get("ok") is True and isinstance(results, list)):
+        print("search note output shape mismatch: .data.results[] expected", file=sys.stderr)
+        raise SystemExit(3)
 
-printf '%s\n' '---' 'merged_top10'
-jq -s 'reduce .[] as $i ([]; if ([.[].path] | index($i.path)) then . else . + [$i] end) | .[:10]' "${tmp_items}"
-printf '%s\n' '---' 'metrics'
-jq -Rcs --arg profile "${PROFILE}" --argjson calls "${cli_calls}" '
-  [split("\n")[] | select(length>0) | tonumber] as $arr
-  | {
-      profile: $profile,
-      cli_calls: $calls,
-      rounds: 1,
-      note_fetch_count: 0,
-      avg_latency_ms: (if ($arr|length)==0 then 0 else (($arr|add) / ($arr|length)) end),
-      p95_latency_ms: (if ($arr|length)==0 then 0 else (($arr|sort)[((($arr|length)*0.95|floor)-1)|if . < 0 then 0 else . end]) end)
-    }' "${tmp_latency}"
+    page_info = payload.get("data", {}).get("page_info") or {}
+    cursor = page_info.get("endCursor") or ""
+    elapsed = (payload.get("meta") or {}).get("elapsed_ms") or 0
+
+    print(f"candidate={cand}")
+    print(f"result_count={len(results)}")
+    print(f"elapsed_ms={elapsed}")
+    if cursor:
+        print(f"end_cursor={cursor}")
+
+    for entry in results:
+        items.append(
+            {
+                "candidate": cand,
+                "title": entry.get("title"),
+                "path": entry.get("path"),
+                "url": entry.get("url"),
+            }
+        )
+    latencies.append(int(elapsed))
+
+seen = set()
+merged = []
+for item in items:
+    path = item.get("path")
+    if not path or path in seen:
+        continue
+    seen.add(path)
+    merged.append(item)
+
+latencies_sorted = sorted(latencies)
+if latencies_sorted:
+    p95_idx = max(0, int(len(latencies_sorted) * 0.95) - 1)
+    p95_latency = latencies_sorted[p95_idx]
+    avg_latency = sum(latencies_sorted) / len(latencies_sorted)
+else:
+    p95_latency = 0
+    avg_latency = 0
+
+metrics = {
+    "profile": profile,
+    "cli_calls": len(candidates),
+    "rounds": 1,
+    "note_fetch_count": 0,
+    "avg_latency_ms": avg_latency,
+    "p95_latency_ms": p95_latency,
+}
+
+print("---")
+print("merged_top10")
+print(json.dumps(merged[:10], ensure_ascii=False))
+print("---")
+print("metrics")
+print(json.dumps(metrics, ensure_ascii=False))
+PY

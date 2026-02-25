@@ -1,7 +1,7 @@
 ---
 name: kibel-agentic-search
 description: Use this skill for high-precision Kibela note retrieval via ambiguity-planner-first workflows.
-allowed-tools: Bash(kibel:--json auth status),Bash(kibel:--json auth login),Bash(kibel:--json search note),Bash(kibel:--json search user),Bash(kibel:--json note get),Bash(kibel:--json note get-many),Bash(kibel:--json note get-from-path),Bash(rg:*),Bash(jq:*)
+allowed-tools: Bash(kibel:auth status),Bash(kibel:auth login),Bash(kibel:search note),Bash(kibel:search user),Bash(kibel:note get),Bash(kibel:note get-many),Bash(kibel:note get-from-path),Bash(rg:*),Bash(python3:*)
 ---
 
 # kibel Agentic Search
@@ -27,29 +27,33 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   echo "kibel not found in PATH (or set KIBEL_BIN)" >&2
   exit 127
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found in PATH" >&2
+  exit 127
+fi
 
-AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+AUTH_JSON="$("${KBIN}" auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
-printf '%s' "${AUTH_JSON}" | jq -e '.data.logged_in == true' >/dev/null || {
+printf '%s' "${AUTH_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data", {}).get("logged_in") is True else 1)' || {
   echo "auth is not ready; run auth login first" >&2
   exit 3
 }
 
-SMOKE_JSON="$("${KBIN}" --json search note --query "test" --first 1 2>/dev/null)" || {
+SMOKE_JSON="$("${KBIN}" search note --query "test" --first 1 2>/dev/null)" || {
   echo "search note smoke failed" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | jq -e '.ok == true' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' || {
   echo "search note smoke returned not ok" >&2
   exit 3
 }
-printf '%s' "${SMOKE_JSON}" | jq -e '(.data.results | type) == "array"' >/dev/null || {
+printf '%s' "${SMOKE_JSON}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d.get("data", {}).get("results"), list) else 1)' || {
   echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }
@@ -61,11 +65,11 @@ If auth is not ready, recover with one of these before continuing:
 
 ```bash
 # interactive (recommended for local)
-"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+"${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 
 # non-interactive token pipe (CI/temporary, `--with-token` reads stdin)
 printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
-  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+  "${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
 ```
 
 Token issue page:
@@ -99,7 +103,7 @@ Single-query search is a fast-path fallback.
 ### 1. Mine latest
 
 ```bash
-"${KBIN}" --json search note --mine --first 10
+"${KBIN}" search note --mine --first 10
 ```
 
 Use this when user intent is "my latest docs", "what I wrote recently", or "my notes list".
@@ -139,27 +143,27 @@ declare -a CANDIDATES=(
   "<scope_or_time_query>"
 )
 for q in "${CANDIDATES[@]}"; do
-  "${KBIN}" --json search note --query "${q}" --first 16
+  "${KBIN}" search note --query "${q}" --first 16
 done
 ```
 
 Cursor pagination per candidate:
 
 ```bash
-"${KBIN}" --json search note --query "<candidate_query>" --after "<cursor>" --first 16
+"${KBIN}" search note --query "<candidate_query>" --after "<cursor>" --first 16
 ```
 
 Optional reusable preset:
 
 ```bash
-"${KBIN}" --json search note --query "<query>" --save-preset "<name>"
-"${KBIN}" --json search note --preset "<name>"
+"${KBIN}" search note --query "<query>" --save-preset "<name>"
+"${KBIN}" search note --preset "<name>"
 ```
 
 ### 4. Precision narrowing
 
 ```bash
-"${KBIN}" --json search note \
+"${KBIN}" search note \
   --query "<candidate_query>" \
   --user-id "<USER_ID>" \
   --group-id "<GROUP_ID>" \
@@ -176,7 +180,7 @@ Notes:
 - If user ID is unknown, discover candidates first:
 
 ```bash
-"${KBIN}" --json search user --query "<query>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
+"${KBIN}" search user --query "<query>" --group-id "<GROUP_ID>" --folder-id "<FOLDER_ID>" --first 10
 ```
 
 ### 5. Corrective loop (required when evidence is weak)
@@ -199,7 +203,7 @@ Actions:
 Use only when query is explicit and low-latency is priority.
 
 ```bash
-"${KBIN}" --json search note --query "<exact_query>" --first 16
+"${KBIN}" search note --query "<exact_query>" --first 16
 ```
 
 ## Verification step (required for high-precision output)
@@ -207,9 +211,9 @@ Use only when query is explicit and low-latency is priority.
 Use result `id` or `path` to validate top hits:
 
 ```bash
-"${KBIN}" --json note get --id "<NOTE_ID>"
-"${KBIN}" --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
-"${KBIN}" --json note get-from-path --path "/notes/<number>"
+"${KBIN}" note get --id "<NOTE_ID>"
+"${KBIN}" note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
+"${KBIN}" note get-from-path --path "/notes/<number>"
 ```
 
 High-precision rule:

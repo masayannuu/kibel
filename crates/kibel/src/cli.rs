@@ -5,8 +5,16 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Parser)]
 #[command(name = "kibel", about = "Kibela CLI", version)]
 pub struct Cli {
-    #[arg(long, global = true, action = ArgAction::SetTrue, help = "Output machine-readable JSON")]
+    #[arg(long, global = true, action = ArgAction::SetTrue, help = "Output machine-readable JSON (default)")]
     pub json: bool,
+    #[arg(
+        long,
+        global = true,
+        action = ArgAction::SetTrue,
+        conflicts_with = "json",
+        help = "Output human-readable text"
+    )]
+    pub text: bool,
     #[arg(long, global = true, action = ArgAction::SetTrue, help = "Read access token from stdin")]
     pub with_token: bool,
     #[arg(
@@ -557,6 +565,7 @@ mod tests {
         .expect("parse should succeed");
 
         assert!(cli.json);
+        assert!(!cli.text);
         match cli.command {
             Command::Note(args) => match args.command {
                 NoteCommand::Create(create) => {
@@ -572,6 +581,14 @@ mod tests {
             },
             _ => panic!("expected note command"),
         }
+    }
+
+    #[test]
+    fn parse_text_mode() {
+        let cli =
+            Cli::try_parse_from(["kibel", "--text", "version"]).expect("parse should succeed");
+        assert!(cli.text);
+        assert!(!cli.json);
     }
 
     #[test]

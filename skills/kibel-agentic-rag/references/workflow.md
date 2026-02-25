@@ -46,7 +46,7 @@ cat templates/ambiguity_planner_card.md
 Pre-check auth. If not ready:
 
 ```bash
-kibel --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+kibel auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 ```
 
 Classify question: `direct / multi_hop / global`.
@@ -56,7 +56,7 @@ Classify question: `direct / multi_hop / global`.
 Run broad search for each planner candidate:
 
 ```bash
-kibel --json search note --query "<candidate_query>" --first "${FIRST}"
+kibel search note --query "<candidate_query>" --first "${FIRST}"
 ```
 
 Loop example:
@@ -70,32 +70,32 @@ declare -a CANDIDATES=(
 for q in "${CANDIDATES[@]}"; do
   # budget guard (example)
   # [[ "${CLI_CALLS}" -lt "${MAX_CLI_CALLS}" ]] || { echo "budget exceeded: cli_calls"; exit 4; }
-  kibel --json search note --query "${q}" --first "${FIRST}"
+  kibel search note --query "${q}" --first "${FIRST}"
 done
 ```
 
 Count:
 
 ```bash
-kibel --json search note --query "<candidate_query>" --first "${FIRST}" | jq '.data.results | length'
+kibel search note --query "<candidate_query>" --first "${FIRST}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", {}).get("results", [])))'
 ```
 
 If results are many, paginate forward:
 
 ```bash
-kibel --json search note --query "<candidate_query>" --after "<cursor>" --first "${FIRST}"
+kibel search note --query "<candidate_query>" --after "<cursor>" --first "${FIRST}"
 ```
 
 Cursor:
 
 ```bash
-kibel --json search note --query "<candidate_query>" --first "${FIRST}" | jq -r '.data.page_info.endCursor // empty'
+kibel search note --query "<candidate_query>" --first "${FIRST}" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("data", {}).get("page_info", {}) or {}).get("endCursor", ""))'
 ```
 
 Optional personal context:
 
 ```bash
-kibel --json search note --mine --first "${FIRST}"
+kibel search note --mine --first "${FIRST}"
 ```
 
 ## 4. frontier_expand + precision
@@ -103,7 +103,7 @@ kibel --json search note --mine --first "${FIRST}"
 Narrow candidates:
 
 ```bash
-kibel --json search note \
+kibel search note \
   --query "<topic>" \
   --user-id "<USER_ID>" \
   --group-id "<GROUP_ID>" \
@@ -115,7 +115,7 @@ If `<USER_ID>` is unknown, omit it and keep narrowing with group/folder filters.
 Or discover candidates first:
 
 ```bash
-kibel --json search user --query "<topic>" --first 10
+kibel search user --query "<topic>" --first 10
 ```
 
 ## 5. evidence_pull + verification
@@ -123,14 +123,14 @@ kibel --json search user --query "<topic>" --first 10
 Get full source before final answer:
 
 ```bash
-kibel --json note get --id "<NOTE_ID>"
-kibel --json note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
+kibel note get --id "<NOTE_ID>"
+kibel note get-many --id "<NOTE_ID_1>" --id "<NOTE_ID_2>"
 ```
 
 or
 
 ```bash
-kibel --json note get-from-path --path "/notes/<number>"
+kibel note get-from-path --path "/notes/<number>"
 ```
 
 ## 6. corrective_loop
