@@ -24,7 +24,13 @@ pub struct Cli {
         help = "Kibela origin URL"
     )]
     pub origin: String,
-    #[arg(long, global = true, env = "KIBELA_TEAM", help = "Team name")]
+    #[arg(
+        long,
+        visible_alias = "tenant",
+        global = true,
+        env = "KIBELA_TEAM",
+        help = "Team name (tenant); env alias KIBELA_TENANT is also supported"
+    )]
     pub team: Option<String>,
     #[arg(long, global = true, value_name = "PATH", help = "Config file path")]
     pub config_path: Option<PathBuf>,
@@ -42,6 +48,7 @@ pub enum Command {
     Feed(FeedArgs),
     Comment(CommentArgs),
     Note(NoteArgs),
+    Graphql(GraphqlArgs),
     Completion(CompletionArgs),
     Version(VersionArgs),
 }
@@ -61,7 +68,7 @@ pub enum AuthCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct AuthLoginArgs {
-    #[arg(long, help = "Team name")]
+    #[arg(long, visible_alias = "tenant", help = "Team name (tenant)")]
     pub team: Option<String>,
 }
 
@@ -122,7 +129,7 @@ pub enum SearchCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct SearchNoteArgs {
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     pub query: String,
     #[arg(long = "resource")]
     pub resources: Vec<String>,
@@ -132,6 +139,10 @@ pub struct SearchNoteArgs {
     pub updated: Option<String>,
     #[arg(long = "group-id")]
     pub group_ids: Vec<String>,
+    #[arg(long = "user-id")]
+    pub user_ids: Vec<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub mine: bool,
     #[arg(long = "folder-id")]
     pub folder_ids: Vec<String>,
     #[arg(long = "liker-id")]
@@ -362,6 +373,71 @@ pub struct NoteAttachToFolderArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct GraphqlArgs {
+    #[command(subcommand)]
+    pub command: GraphqlCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum GraphqlCommand {
+    Run(GraphqlRunArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct GraphqlRunArgs {
+    #[arg(long, conflicts_with = "query_file", help = "GraphQL query text")]
+    pub query: Option<String>,
+    #[arg(
+        long = "query-file",
+        value_name = "PATH",
+        conflicts_with = "query",
+        help = "Path to a file containing GraphQL query text"
+    )]
+    pub query_file: Option<PathBuf>,
+    #[arg(
+        long,
+        conflicts_with = "variables_file",
+        help = "JSON object for GraphQL variables"
+    )]
+    pub variables: Option<String>,
+    #[arg(
+        long = "variables-file",
+        value_name = "PATH",
+        conflicts_with = "variables",
+        help = "Path to a file containing GraphQL variables JSON object"
+    )]
+    pub variables_file: Option<PathBuf>,
+    #[arg(long, default_value_t = 15, help = "Request timeout (seconds)")]
+    pub timeout_secs: u64,
+    #[arg(
+        long = "response-limit-mib",
+        default_value_t = 2,
+        help = "Response size limit (MiB)"
+    )]
+    pub response_limit_mib: u64,
+    #[arg(long = "max-depth", default_value_t = 8, help = "Maximum query depth")]
+    pub max_depth: u32,
+    #[arg(
+        long = "max-complexity",
+        default_value_t = 1000,
+        help = "Maximum static complexity score"
+    )]
+    pub max_complexity: u32,
+    #[arg(
+        long = "allow-mutation",
+        action = ArgAction::SetTrue,
+        help = "Allow mutation execution in graphql run mode"
+    )]
+    pub allow_mutation: bool,
+    #[arg(
+        long = "unsafe-no-cost-check",
+        action = ArgAction::SetTrue,
+        help = "Allow execution when query shape analysis fails"
+    )]
+    pub unsafe_no_cost_check: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct CompletionArgs {
     pub shell: Shell,
 }
@@ -392,8 +468,8 @@ fn parse_folder_arg(raw: &str) -> Result<NoteFolderArg, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_folder_arg, AuthCommand, Cli, Command, ConfigCommand, ConfigSetCommand, GroupCommand,
-        NoteCommand, SearchCommand,
+        parse_folder_arg, AuthCommand, Cli, Command, ConfigCommand, ConfigSetCommand,
+        GraphqlCommand, GroupCommand, NoteCommand, SearchCommand,
     };
     use clap::Parser;
 
@@ -569,6 +645,26 @@ mod tests {
                     assert_eq!(note.resources, vec!["note"]);
                     assert_eq!(note.group_ids, vec!["G1"]);
                     assert_eq!(note.first, Some(8));
+                    assert!(note.user_ids.is_empty());
+                    assert!(!note.mine);
+                }
+                SearchCommand::Folder(_) => panic!("expected search note command"),
+            },
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn parse_search_note_without_query_with_mine() {
+        let cli = Cli::try_parse_from(["kibel", "search", "note", "--mine"])
+            .expect("parse should succeed");
+
+        match cli.command {
+            Command::Search(args) => match args.command {
+                SearchCommand::Note(note) => {
+                    assert_eq!(note.query, "");
+                    assert!(note.mine);
+                    assert!(note.user_ids.is_empty());
                 }
                 SearchCommand::Folder(_) => panic!("expected search note command"),
             },
@@ -637,6 +733,34 @@ mod tests {
                 ConfigCommand::Profiles(_) => panic!("expected set command"),
             },
             _ => panic!("expected config command"),
+        }
+    }
+
+    #[test]
+    fn parse_graphql_run_defaults() {
+        let cli = Cli::try_parse_from([
+            "kibel",
+            "graphql",
+            "run",
+            "--query",
+            "query Q { groups { edges { node { id } } } }",
+        ])
+        .expect("parse should succeed");
+
+        match cli.command {
+            Command::Graphql(args) => match args.command {
+                GraphqlCommand::Run(run) => {
+                    assert!(run.query.is_some());
+                    assert!(run.variables.is_none());
+                    assert_eq!(run.timeout_secs, 15);
+                    assert_eq!(run.response_limit_mib, 2);
+                    assert_eq!(run.max_depth, 8);
+                    assert_eq!(run.max_complexity, 1000);
+                    assert!(!run.allow_mutation);
+                    assert!(!run.unsafe_no_cost_check);
+                }
+            },
+            _ => panic!("expected graphql command"),
         }
     }
 }

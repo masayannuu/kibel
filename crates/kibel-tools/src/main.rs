@@ -4,25 +4,190 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::Duration;
 
-const RESOURCE_ORDER: &[&str] = &[
-    "searchNote",
-    "searchFolder",
-    "getGroups",
-    "getFolders",
-    "getNotes",
-    "getNote",
-    "getNoteFromPath",
-    "getFolder",
-    "getFolderFromPath",
-    "getFeedSections",
-    "createNote",
-    "createComment",
-    "createCommentReply",
-    "createFolder",
-    "moveNoteToAnotherFolder",
-    "attachNoteToFolder",
-    "updateNoteContent",
+const INTROSPECTION_QUERY: &str = r#"
+query EndpointIntrospection {
+  __schema {
+    queryType {
+      fields {
+        name
+        args {
+          name
+          defaultValue
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    mutationType {
+      fields {
+        name
+        args {
+          name
+          defaultValue
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+const CREATE_NOTE_SCHEMA_QUERY: &str = r#"
+query CreateNoteSchema {
+  createNoteInput: __type(name: "CreateNoteInput") {
+    inputFields {
+      name
+    }
+  }
+  createNotePayload: __type(name: "CreateNotePayload") {
+    fields {
+      name
+    }
+  }
+  noteType: __type(name: "Note") {
+    fields {
+      name
+    }
+  }
+}
+"#;
+const GRAPHQL_ACCEPT_HEADER: &str = "application/graphql-response+json, application/json;q=0.9";
+const REQUIRED_CREATE_NOTE_INPUT_FIELDS: &[&str] = &["title", "content", "groupIds", "coediting"];
+const REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS: &[&str] = &["note"];
+
+#[derive(Debug, Clone, Copy)]
+struct ResourceDefinition {
+    name: &'static str,
+    kind: &'static str,
+    field: &'static str,
+    client_method: &'static str,
+}
+
+const RESOURCE_DEFINITIONS: &[ResourceDefinition] = &[
+    ResourceDefinition {
+        name: "searchNote",
+        kind: "query",
+        field: "search",
+        client_method: "search_note",
+    },
+    ResourceDefinition {
+        name: "searchFolder",
+        kind: "query",
+        field: "searchFolder",
+        client_method: "search_folder",
+    },
+    ResourceDefinition {
+        name: "getGroups",
+        kind: "query",
+        field: "groups",
+        client_method: "get_groups",
+    },
+    ResourceDefinition {
+        name: "getFolders",
+        kind: "query",
+        field: "folders",
+        client_method: "get_folders",
+    },
+    ResourceDefinition {
+        name: "getNotes",
+        kind: "query",
+        field: "notes",
+        client_method: "get_notes",
+    },
+    ResourceDefinition {
+        name: "getNote",
+        kind: "query",
+        field: "note",
+        client_method: "get_note",
+    },
+    ResourceDefinition {
+        name: "getNoteFromPath",
+        kind: "query",
+        field: "noteFromPath",
+        client_method: "get_note_from_path",
+    },
+    ResourceDefinition {
+        name: "getFolder",
+        kind: "query",
+        field: "folder",
+        client_method: "get_folder",
+    },
+    ResourceDefinition {
+        name: "getFolderFromPath",
+        kind: "query",
+        field: "folderFromPath",
+        client_method: "get_folder_from_path",
+    },
+    ResourceDefinition {
+        name: "getFeedSections",
+        kind: "query",
+        field: "feedSections",
+        client_method: "get_feed_sections",
+    },
+    ResourceDefinition {
+        name: "createNote",
+        kind: "mutation",
+        field: "createNote",
+        client_method: "create_note",
+    },
+    ResourceDefinition {
+        name: "createComment",
+        kind: "mutation",
+        field: "createComment",
+        client_method: "create_comment",
+    },
+    ResourceDefinition {
+        name: "createCommentReply",
+        kind: "mutation",
+        field: "createCommentReply",
+        client_method: "create_comment_reply",
+    },
+    ResourceDefinition {
+        name: "createFolder",
+        kind: "mutation",
+        field: "createFolder",
+        client_method: "create_folder",
+    },
+    ResourceDefinition {
+        name: "moveNoteToAnotherFolder",
+        kind: "mutation",
+        field: "moveNoteToAnotherFolder",
+        client_method: "move_note_to_another_folder",
+    },
+    ResourceDefinition {
+        name: "attachNoteToFolder",
+        kind: "mutation",
+        field: "attachNoteToFolder",
+        client_method: "attach_note_to_folder",
+    },
+    ResourceDefinition {
+        name: "updateNoteContent",
+        kind: "mutation",
+        field: "updateNoteContent",
+        client_method: "update_note",
+    },
 ];
 
 #[derive(Parser)]
@@ -49,12 +214,14 @@ enum TopCommand {
 enum CreateNoteContractAction {
     Check(CreateNoteContractArgs),
     Write(CreateNoteContractArgs),
+    RefreshSnapshot(CreateNoteRefreshArgs),
 }
 
 #[derive(Subcommand)]
 enum ResourceContractAction {
     Check(ResourceContractArgs),
     Write(ResourceContractArgs),
+    RefreshEndpoint(EndpointRefreshArgs),
 }
 
 #[derive(Args, Clone)]
@@ -69,6 +236,23 @@ struct CreateNoteContractArgs {
         default_value = "crates/kibel-client/src/generated_create_note_contract.rs"
     )]
     generated: String,
+}
+
+#[derive(Args, Clone)]
+struct CreateNoteRefreshArgs {
+    #[arg(long, env = "KIBELA_ORIGIN")]
+    origin: String,
+    #[arg(long, env = "KIBELA_ACCESS_TOKEN")]
+    token: String,
+    #[arg(
+        long,
+        default_value = "research/schema/create_note_contract.snapshot.json"
+    )]
+    snapshot: String,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[arg(long, default_value_t = 30)]
+    timeout_secs: u64,
 }
 
 #[derive(Args, Clone)]
@@ -88,6 +272,23 @@ struct ResourceContractArgs {
         default_value = "crates/kibel-client/src/generated_resource_contracts.rs"
     )]
     generated: String,
+}
+
+#[derive(Args, Clone)]
+struct EndpointRefreshArgs {
+    #[arg(long, env = "KIBELA_ORIGIN")]
+    origin: String,
+    #[arg(long, env = "KIBELA_ACCESS_TOKEN")]
+    token: String,
+    #[arg(
+        long,
+        default_value = "research/schema/resource_contracts.endpoint.snapshot.json"
+    )]
+    endpoint_snapshot: String,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[arg(long, default_value_t = 30)]
+    timeout_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -168,10 +369,16 @@ fn run(cli: Cli) -> Result<(), String> {
         TopCommand::CreateNoteContract { action } => match action {
             CreateNoteContractAction::Check(args) => run_create_note_contract_check(&root, &args),
             CreateNoteContractAction::Write(args) => run_create_note_contract_write(&root, &args),
+            CreateNoteContractAction::RefreshSnapshot(args) => {
+                run_create_note_contract_refresh_snapshot(&root, &args)
+            }
         },
         TopCommand::ResourceContract { action } => match action {
             ResourceContractAction::Check(args) => run_resource_contract_check(&root, &args),
             ResourceContractAction::Write(args) => run_resource_contract_write(&root, &args),
+            ResourceContractAction::RefreshEndpoint(args) => {
+                run_resource_contract_refresh_endpoint(&root, &args)
+            }
         },
     }
 }
@@ -191,6 +398,25 @@ fn resolve_path(root: &Path, raw: &str) -> PathBuf {
     } else {
         root.join(path)
     }
+}
+
+fn resource_definitions() -> &'static [ResourceDefinition] {
+    RESOURCE_DEFINITIONS
+}
+
+fn endpoint_from_origin(origin: &str) -> String {
+    let normalized = origin.trim().trim_end_matches('/');
+    if normalized.ends_with("/api/v1") {
+        normalized.to_string()
+    } else {
+        format!("{normalized}/api/v1")
+    }
+}
+
+fn now_rfc3339() -> Result<String, String> {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| format!("failed to format timestamp: {error}"))
 }
 
 fn read_json(path: &Path) -> Result<Value, String> {
@@ -236,6 +462,171 @@ fn normalize_string_list(value: &Value, context: &str) -> Result<Vec<String>, St
     Ok(result)
 }
 
+fn collect_graphql_name_list(value: &Value, context: &str) -> Result<Vec<String>, String> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| format!("{context} must be an array"))?;
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for item in items {
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            return Err(format!(
+                "{context} should contain objects with string `name`"
+            ));
+        };
+        let normalized = name.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if seen.insert(normalized.to_string()) {
+            result.push(normalized.to_string());
+        }
+    }
+    Ok(result)
+}
+
+#[derive(Debug, Clone)]
+struct GraphqlArg {
+    name: String,
+    required: bool,
+}
+
+fn fetch_introspection_payload(
+    endpoint: &str,
+    token: &str,
+    timeout_secs: u64,
+) -> Result<Value, String> {
+    fetch_graphql_payload(endpoint, token, INTROSPECTION_QUERY, timeout_secs)
+}
+
+fn fetch_graphql_payload(
+    endpoint: &str,
+    token: &str,
+    query: &str,
+    timeout_secs: u64,
+) -> Result<Value, String> {
+    let payload = json!({
+        "query": query,
+        "variables": {}
+    });
+    let payload_raw =
+        serde_json::to_string(&payload).map_err(|error| format!("json render failed: {error}"))?;
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(timeout_secs.max(1)))
+        .build();
+    let request = agent
+        .post(endpoint)
+        .set("Content-Type", "application/json")
+        .set("Accept", GRAPHQL_ACCEPT_HEADER)
+        .set("Authorization", &format!("Bearer {token}"));
+
+    let (raw, status_code) = match request.send_string(&payload_raw) {
+        Ok(response) => {
+            let body = response
+                .into_string()
+                .map_err(|err| format!("failed to read response: {err}"))?;
+            (body, None)
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            let body = response
+                .into_string()
+                .map_err(|err| format!("failed to read error response: {err}"))?;
+            (body, Some(code))
+        }
+        Err(err) => {
+            return Err(format!("request failed: {err}"));
+        }
+    };
+
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| format!("failed to parse response: {error}"))?;
+    if let Some(message) = extract_graphql_error_message(&payload) {
+        if let Some(code) = status_code {
+            return Err(format!("graphql error (status {code}): {message}"));
+        }
+        return Err(format!("graphql error: {message}"));
+    }
+    Ok(payload)
+}
+
+fn extract_graphql_error_message(payload: &Value) -> Option<String> {
+    let errors = payload.get("errors")?.as_array()?;
+    if errors.is_empty() {
+        return None;
+    }
+    let mut messages = Vec::new();
+    for error in errors {
+        if let Some(message) = error.get("message").and_then(Value::as_str) {
+            messages.push(message.to_string());
+            continue;
+        }
+        messages.push(error.to_string());
+    }
+    Some(messages.join(" | "))
+}
+
+fn parse_graphql_fields(
+    payload: &Value,
+    kind: &str,
+) -> Result<HashMap<String, Vec<GraphqlArg>>, String> {
+    let pointer = match kind {
+        "query" => "/data/__schema/queryType/fields",
+        "mutation" => "/data/__schema/mutationType/fields",
+        _ => return Err(format!("unsupported graphql kind: {kind}")),
+    };
+
+    let fields = payload
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("introspection missing {kind} fields"))?;
+
+    let mut result = HashMap::new();
+    for (index, field) in fields.iter().enumerate() {
+        let context = format!("{kind} fields[{index}]");
+        let object = field
+            .as_object()
+            .ok_or_else(|| format!("{context} must be an object"))?;
+        let name = get_trimmed_string(object, "name", &context)?;
+        let args = object
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|value| value.as_slice())
+            .unwrap_or(&[]);
+        let mut parsed_args = Vec::new();
+        for (arg_index, arg) in args.iter().enumerate() {
+            let arg_context = format!("{context}.args[{arg_index}]");
+            let arg_object = arg
+                .as_object()
+                .ok_or_else(|| format!("{arg_context} must be an object"))?;
+            let arg_name = get_trimmed_string(arg_object, "name", &arg_context)?;
+            let required = arg_is_required(arg_object, &arg_context)?;
+            parsed_args.push(GraphqlArg {
+                name: arg_name,
+                required,
+            });
+        }
+        result.insert(name, parsed_args);
+    }
+
+    Ok(result)
+}
+
+fn arg_is_required(
+    arg_object: &serde_json::Map<String, Value>,
+    context: &str,
+) -> Result<bool, String> {
+    let type_value = arg_object
+        .get("type")
+        .ok_or_else(|| format!("{context} missing type"))?;
+    let kind = type_value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{context} type.kind missing"))?;
+    let default_value = arg_object.get("defaultValue");
+    Ok(kind == "NON_NULL" && default_value.is_none_or(|value| value.is_null()))
+}
+
 fn get_trimmed_string(
     object: &serde_json::Map<String, Value>,
     key: &str,
@@ -261,6 +652,14 @@ fn parse_schema_contract_version(
 fn rust_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
+}
+
+fn to_pascal_case(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 fn render_array_const(name: &str, values: &[String]) -> String {
@@ -321,12 +720,18 @@ fn load_create_note_snapshot(path: &Path) -> Result<CreateNoteSnapshot, String> 
         "`required_payload_fields`",
     )?;
 
-    let input_set = input_fields.iter().collect::<HashSet<_>>();
-    let payload_set = payload_fields.iter().collect::<HashSet<_>>();
+    let input_set = input_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let payload_set = payload_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
 
     let missing_input = required_input_fields
         .iter()
-        .filter(|field| !input_set.contains(*field))
+        .filter(|field| !input_set.contains(field.as_str()))
         .cloned()
         .collect::<Vec<_>>();
     if !missing_input.is_empty() {
@@ -335,7 +740,7 @@ fn load_create_note_snapshot(path: &Path) -> Result<CreateNoteSnapshot, String> 
 
     let missing_payload = required_payload_fields
         .iter()
-        .filter(|field| !payload_set.contains(*field))
+        .filter(|field| !payload_set.contains(field.as_str()))
         .cloned()
         .collect::<Vec<_>>();
     if !missing_payload.is_empty() {
@@ -412,6 +817,163 @@ fn run_create_note_contract_write(
         .map_err(|error| format!("failed to write {}: {error}", generated_path.display()))?;
     println!("schema contract check: ok (written)");
     Ok(())
+}
+
+fn run_create_note_contract_refresh_snapshot(
+    root: &Path,
+    args: &CreateNoteRefreshArgs,
+) -> Result<(), String> {
+    let endpoint = args
+        .endpoint
+        .clone()
+        .unwrap_or_else(|| endpoint_from_origin(&args.origin));
+    let captured_at = now_rfc3339()?;
+    let payload = fetch_graphql_payload(
+        &endpoint,
+        &args.token,
+        CREATE_NOTE_SCHEMA_QUERY,
+        args.timeout_secs,
+    )?;
+    let snapshot_value = build_create_note_snapshot_from_introspection(
+        &payload,
+        &args.origin,
+        &endpoint,
+        &captured_at,
+    )?;
+
+    let snapshot_path = resolve_path(root, &args.snapshot);
+    write_json_pretty(&snapshot_path, &snapshot_value)?;
+    println!("create-note contract snapshot refresh: ok (written)");
+    Ok(())
+}
+
+fn build_create_note_snapshot_from_introspection(
+    payload: &Value,
+    origin: &str,
+    endpoint: &str,
+    captured_at: &str,
+) -> Result<Value, String> {
+    let input_fields = collect_graphql_name_list(
+        payload
+            .pointer("/data/createNoteInput/inputFields")
+            .ok_or_else(|| "missing /data/createNoteInput/inputFields".to_string())?,
+        "createNoteInput.inputFields",
+    )?;
+    let payload_fields = collect_graphql_name_list(
+        payload
+            .pointer("/data/createNotePayload/fields")
+            .ok_or_else(|| "missing /data/createNotePayload/fields".to_string())?,
+        "createNotePayload.fields",
+    )?;
+    let note_projection_fields = collect_graphql_name_list(
+        payload
+            .pointer("/data/noteType/fields")
+            .ok_or_else(|| "missing /data/noteType/fields".to_string())?,
+        "noteType.fields",
+    )?;
+
+    let input_set = input_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let payload_set = payload_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let missing_required_input = REQUIRED_CREATE_NOTE_INPUT_FIELDS
+        .iter()
+        .filter(|field| !input_set.contains(*field))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_required_input.is_empty() {
+        return Err(format!(
+            "missing required create-note input fields from introspection: {}",
+            missing_required_input.join(", ")
+        ));
+    }
+    let missing_required_payload = REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS
+        .iter()
+        .filter(|field| !payload_set.contains(*field))
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing_required_payload.is_empty() {
+        return Err(format!(
+            "missing required create-note payload fields from introspection: {}",
+            missing_required_payload.join(", ")
+        ));
+    }
+    if !note_projection_fields.iter().any(|field| field == "id") {
+        return Err("noteType.fields must include id".to_string());
+    }
+
+    Ok(json!({
+        "schema_contract_version": 1,
+        "captured_at": captured_at,
+        "source": {
+            "origin": origin,
+            "artifact": format!("live-introspection:{endpoint}"),
+        },
+        "create_note_input_fields": input_fields,
+        "create_note_payload_fields": payload_fields,
+        "create_note_note_projection_fields": note_projection_fields,
+        "required_input_fields": REQUIRED_CREATE_NOTE_INPUT_FIELDS,
+        "required_payload_fields": REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS,
+    }))
+}
+
+fn build_endpoint_snapshot_from_introspection(
+    definitions: &[ResourceDefinition],
+    payload: &Value,
+    origin: &str,
+    endpoint: &str,
+    captured_at: &str,
+) -> Result<Value, String> {
+    let query_fields = parse_graphql_fields(payload, "query")?;
+    let mutation_fields = parse_graphql_fields(payload, "mutation")?;
+
+    let mut resources = Vec::new();
+    for definition in definitions {
+        let fields = match definition.kind {
+            "query" => &query_fields,
+            "mutation" => &mutation_fields,
+            other => return Err(format!("unsupported kind: {other}")),
+        };
+        let args = fields
+            .get(definition.field)
+            .ok_or_else(|| format!("missing graphql field: {}", definition.field))?;
+
+        let mut all_variables = Vec::new();
+        let mut required_variables = Vec::new();
+        let mut seen = HashSet::new();
+        for arg in args {
+            if !seen.insert(arg.name.clone()) {
+                continue;
+            }
+            all_variables.push(arg.name.clone());
+            if arg.required {
+                required_variables.push(arg.name.clone());
+            }
+        }
+
+        resources.push(json!({
+            "name": definition.name,
+            "kind": definition.kind,
+            "field": definition.field,
+            "operation": to_pascal_case(definition.name),
+            "client_method": definition.client_method,
+            "all_variables": all_variables,
+            "required_variables": required_variables,
+        }));
+    }
+
+    Ok(json!({
+        "schema_contract_version": 1,
+        "captured_at": captured_at,
+        "origin": origin,
+        "endpoint": endpoint,
+        "resource_count": definitions.len(),
+        "resources": resources,
+    }))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -496,16 +1058,19 @@ fn load_endpoint_snapshot(path: &Path) -> Result<EndpointSnapshot, String> {
         );
     }
 
-    let missing = RESOURCE_ORDER
+    let missing = resource_definitions()
         .iter()
-        .filter(|name| !resources.contains_key(**name))
-        .map(|name| (*name).to_string())
+        .filter(|definition| !resources.contains_key(definition.name))
+        .map(|definition| definition.name.to_string())
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         return Err(format!("endpoint snapshot missing resources: {missing:?}"));
     }
 
-    let expected = RESOURCE_ORDER.iter().copied().collect::<BTreeSet<_>>();
+    let expected = resource_definitions()
+        .iter()
+        .map(|definition| definition.name)
+        .collect::<BTreeSet<_>>();
     let unexpected = resources
         .keys()
         .filter(|name| !expected.contains(name.as_str()))
@@ -553,11 +1118,11 @@ fn build_resource_snapshot_value(
         .to_string();
 
     let mut rendered_resources = Vec::new();
-    for name in RESOURCE_ORDER {
+    for definition in resource_definitions() {
         let item = endpoint_payload
             .resources
-            .get(*name)
-            .ok_or_else(|| format!("endpoint snapshot missing resource `{name}`"))?;
+            .get(definition.name)
+            .ok_or_else(|| format!("endpoint snapshot missing resource `{}`", definition.name))?;
         rendered_resources.push(json!({
             "name": item.name,
             "kind": item.kind,
@@ -822,6 +1387,10 @@ fn render_resource_contract(resource: &NormalizedResource) -> String {
     .join("\n")
 }
 
+fn trusted_operation_variant(resource: &NormalizedResource) -> String {
+    to_pascal_case(&resource.name)
+}
+
 fn render_resource_module(snapshot: &ResourceModuleSnapshot) -> String {
     let mut lines = vec![
         "// This file is generated by crates/kibel-tools.".to_string(),
@@ -853,6 +1422,44 @@ fn render_resource_module(snapshot: &ResourceModuleSnapshot) -> String {
         lines.push(render_resource_contract(resource));
     }
     lines.push("];".to_string());
+    lines.push(String::new());
+    lines.push("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]".to_string());
+    lines.push("pub enum TrustedOperation {".to_string());
+    for resource in &snapshot.resources {
+        lines.push(format!("    {},", trusted_operation_variant(resource)));
+    }
+    lines.push("}".to_string());
+    lines.push(String::new());
+    lines.push("pub const TRUSTED_OPERATIONS: &[TrustedOperation] = &[".to_string());
+    for resource in &snapshot.resources {
+        lines.push(format!(
+            "    TrustedOperation::{},",
+            trusted_operation_variant(resource)
+        ));
+    }
+    lines.push("];".to_string());
+    lines.push(String::new());
+    lines.push(
+        "pub const fn trusted_operation_contract_index(operation: TrustedOperation) -> usize {"
+            .to_string(),
+    );
+    lines.push("    match operation {".to_string());
+    for (index, resource) in snapshot.resources.iter().enumerate() {
+        lines.push(format!(
+            "        TrustedOperation::{} => {},",
+            trusted_operation_variant(resource),
+            index
+        ));
+    }
+    lines.push("    }".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+    lines.push(
+        "pub fn trusted_operation_contract(operation: TrustedOperation) -> &'static ResourceContract {"
+            .to_string(),
+    );
+    lines.push("    &RESOURCE_CONTRACTS[trusted_operation_contract_index(operation)]".to_string());
+    lines.push("}".to_string());
     lines.push(String::new());
 
     let mut rendered = lines.join("\n");
@@ -932,6 +1539,39 @@ fn run_resource_contract_write(root: &Path, args: &ResourceContractArgs) -> Resu
     Ok(())
 }
 
+fn run_resource_contract_refresh_endpoint(
+    root: &Path,
+    args: &EndpointRefreshArgs,
+) -> Result<(), String> {
+    let origin = args.origin.trim();
+    if origin.is_empty() {
+        return Err("origin is required (use --origin or KIBELA_ORIGIN)".to_string());
+    }
+    let token = args.token.trim();
+    if token.is_empty() {
+        return Err("token is required (use --token or KIBELA_ACCESS_TOKEN)".to_string());
+    }
+
+    let endpoint = args
+        .endpoint
+        .clone()
+        .unwrap_or_else(|| endpoint_from_origin(origin));
+    let payload = fetch_introspection_payload(&endpoint, token, args.timeout_secs)?;
+    let captured_at = now_rfc3339()?;
+    let snapshot_value = build_endpoint_snapshot_from_introspection(
+        resource_definitions(),
+        &payload,
+        origin,
+        &endpoint,
+        &captured_at,
+    )?;
+
+    let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
+    write_json_pretty(&endpoint_snapshot_path, &snapshot_value)?;
+    println!("endpoint snapshot refresh: ok (written)");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1006,6 +1646,191 @@ mod tests {
             normalize_resource_snapshot(&payload).expect_err("invalid required vars must fail");
         assert!(
             error.contains("required vars not in all_variables"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn build_endpoint_snapshot_from_introspection_extracts_required_args() {
+        let payload = json!({
+            "data": {
+                "__schema": {
+                    "queryType": {
+                        "fields": [
+                            {
+                                "name": "search",
+                                "args": [
+                                    {
+                                        "name": "query",
+                                        "defaultValue": null,
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "name": null,
+                                            "ofType": {
+                                                "kind": "SCALAR",
+                                                "name": "String",
+                                                "ofType": null
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "name": "first",
+                                        "defaultValue": "16",
+                                        "type": {
+                                            "kind": "SCALAR",
+                                            "name": "Int",
+                                            "ofType": null
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "mutationType": {
+                        "fields": [
+                            {
+                                "name": "createNote",
+                                "args": [
+                                    {
+                                        "name": "input",
+                                        "defaultValue": null,
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "name": null,
+                                            "ofType": {
+                                                "kind": "INPUT_OBJECT",
+                                                "name": "CreateNoteInput",
+                                                "ofType": null
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+        let definitions = vec![
+            ResourceDefinition {
+                name: "searchNote",
+                kind: "query",
+                field: "search",
+                client_method: "search_note",
+            },
+            ResourceDefinition {
+                name: "createNote",
+                kind: "mutation",
+                field: "createNote",
+                client_method: "create_note",
+            },
+        ];
+
+        let snapshot = build_endpoint_snapshot_from_introspection(
+            &definitions,
+            &payload,
+            "https://example.kibe.la",
+            "https://example.kibe.la/api/v1",
+            "2026-02-24T00:00:00Z",
+        )
+        .expect("snapshot must build");
+        let resources = snapshot
+            .get("resources")
+            .and_then(Value::as_array)
+            .expect("resources should be array");
+        let search = resources
+            .iter()
+            .find(|item| item.get("name").and_then(Value::as_str) == Some("searchNote"))
+            .expect("searchNote should exist");
+        let required = search
+            .get("required_variables")
+            .and_then(Value::as_array)
+            .expect("required_variables should be array");
+        assert_eq!(required, &vec![Value::String("query".to_string())]);
+    }
+
+    #[test]
+    fn build_create_note_snapshot_from_introspection_extracts_fields() {
+        let payload = json!({
+            "data": {
+                "createNoteInput": {
+                    "inputFields": [
+                        { "name": "title" },
+                        { "name": "content" },
+                        { "name": "groupIds" },
+                        { "name": "coediting" },
+                        { "name": "draft" }
+                    ]
+                },
+                "createNotePayload": {
+                    "fields": [
+                        { "name": "note" },
+                        { "name": "clientMutationId" }
+                    ]
+                },
+                "noteType": {
+                    "fields": [
+                        { "name": "id" },
+                        { "name": "title" }
+                    ]
+                }
+            }
+        });
+
+        let snapshot = build_create_note_snapshot_from_introspection(
+            &payload,
+            "https://example.kibe.la",
+            "https://example.kibe.la/api/v1",
+            "2026-02-24T00:00:00Z",
+        )
+        .expect("create note snapshot should build");
+
+        assert_eq!(
+            snapshot
+                .pointer("/create_note_input_fields/0")
+                .and_then(Value::as_str),
+            Some("title")
+        );
+        assert_eq!(
+            snapshot
+                .pointer("/required_payload_fields/0")
+                .and_then(Value::as_str),
+            Some("note")
+        );
+    }
+
+    #[test]
+    fn build_create_note_snapshot_from_introspection_rejects_missing_required_fields() {
+        let payload = json!({
+            "data": {
+                "createNoteInput": {
+                    "inputFields": [
+                        { "name": "title" },
+                        { "name": "content" }
+                    ]
+                },
+                "createNotePayload": {
+                    "fields": [
+                        { "name": "note" }
+                    ]
+                },
+                "noteType": {
+                    "fields": [
+                        { "name": "id" }
+                    ]
+                }
+            }
+        });
+
+        let error = build_create_note_snapshot_from_introspection(
+            &payload,
+            "https://example.kibe.la",
+            "https://example.kibe.la/api/v1",
+            "2026-02-24T00:00:00Z",
+        )
+        .expect_err("missing required fields should fail");
+        assert!(
+            error.contains("missing required create-note input fields"),
             "unexpected error: {error}"
         );
     }

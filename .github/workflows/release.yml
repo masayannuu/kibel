@@ -4,9 +4,19 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -24,27 +34,193 @@ jobs:
           cargo run -p kibel-tools -- create-note-contract check
           cargo run -p kibel-tools -- resource-contract check
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+          cargo test -p kibel-client --doc
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
       - name: Verify package manifests
         run: |
           cargo package --locked -p kibel-client
+  build-linux:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
 
-      - name: Build release binary
-        run: cargo build --release -p kibel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
-      - name: Bundle release artifact
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build release binary (linux matrix)
+        run: |
+          cross build --release -p kibel --target "${{ matrix.target }}"
+
+      - name: Bundle release artifact (linux matrix)
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          ARCHIVE="kibel-${VERSION}-linux-x86_64.tar.gz"
-          tar -C target/release -czf "${ARCHIVE}" kibel
+          ARCHIVE="kibel-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/kibel" ./kibel
+          tar -czf "${ARCHIVE}" kibel
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
-      - name: Upload release artifacts
+      - name: Upload packaged linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kibel-${{ github.ref_name }}-linux-x86_64
+          name: kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}
           path: |
-            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz
-            kibel-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+            kibel-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz.sha256
+
+  build-darwin:
+    needs: validate
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            arch: x86_64
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustup target add "${{ matrix.target }}"
+
+      - name: Build release binary (darwin matrix)
+        run: |
+          cargo build --release -p kibel --target "${{ matrix.target }}"
+
+      - name: Bundle release artifact (darwin matrix)
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ARCHIVE="kibel-${VERSION}-darwin-${{ matrix.arch }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/kibel" ./kibel
+          tar -czf "${ARCHIVE}" kibel
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+
+      - name: Upload packaged darwin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kibel-${{ github.ref_name }}-darwin-${{ matrix.arch }}
+          path: |
+            kibel-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
+            kibel-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
+
+  release:
+    needs:
+      - build-linux
+      - build-darwin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kibel-${{ github.ref_name }}-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create combined checksums manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          cd dist
+          sha256sum kibel-"${VERSION}"-*.tar.gz > "kibel-${VERSION}-checksums.txt"
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*-checksums.txt
+          generate_release_notes: true
+
+      - name: Attest release artifacts provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+
+  homebrew-tap:
+    needs: release
+    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_REPO != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kibel-${{ github.ref_name }}-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checkout Homebrew tap repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          repository: ${{ secrets.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render Homebrew formula
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          LINUX_X86_64_SHA="$(awk '{print $1}' "dist/kibel-${VERSION}-linux-x86_64.tar.gz.sha256")"
+          LINUX_AARCH64_SHA="$(awk '{print $1}' "dist/kibel-${VERSION}-linux-aarch64.tar.gz.sha256")"
+          DARWIN_X86_64_SHA="$(awk '{print $1}' "dist/kibel-${VERSION}-darwin-x86_64.tar.gz.sha256")"
+          DARWIN_AARCH64_SHA="$(awk '{print $1}' "dist/kibel-${VERSION}-darwin-aarch64.tar.gz.sha256")"
+
+          mkdir -p tap/Formula
+          ./scripts/render_homebrew_formula.sh \
+            --tag "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --linux-x86_64-sha "${LINUX_X86_64_SHA}" \
+            --linux-aarch64-sha "${LINUX_AARCH64_SHA}" \
+            --darwin-x86_64-sha "${DARWIN_X86_64_SHA}" \
+            --darwin-aarch64-sha "${DARWIN_AARCH64_SHA}" \
+            > tap/Formula/kibel.rb
+
+      - name: Commit and push Homebrew formula update
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/kibel.rb
+          if git diff --cached --quiet; then
+            echo "No Homebrew formula changes"
+            exit 0
+          fi
+          git commit -m "chore: update kibel formula for ${GITHUB_REF_NAME}"
+          git push

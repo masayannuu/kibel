@@ -136,6 +136,18 @@ impl Config {
         true
     }
 
+    /// Resolves effective team from request/default config.
+    ///
+    /// # Examples
+    /// ```
+    /// use kibel_client::Config;
+    ///
+    /// let mut config = Config::default();
+    /// config.set_default_team("acme");
+    ///
+    /// assert_eq!(config.resolve_team(Some("spike")).as_deref(), Some("spike"));
+    /// assert_eq!(config.resolve_team(None).as_deref(), Some("acme"));
+    /// ```
     pub fn resolve_team(&self, requested_team: Option<&str>) -> Option<String> {
         requested_team
             .map(str::trim)
@@ -144,6 +156,25 @@ impl Config {
             .or_else(|| self.default_team.clone())
     }
 
+    /// Resolves origin using explicit request first, then team profile.
+    ///
+    /// # Examples
+    /// ```
+    /// use kibel_client::Config;
+    ///
+    /// let mut config = Config::default();
+    /// config.set_default_team("acme");
+    /// config.set_profile_origin("acme", "https://acme.kibe.la");
+    ///
+    /// assert_eq!(
+    ///     config.resolve_origin(None, None).as_deref(),
+    ///     Some("https://acme.kibe.la")
+    /// );
+    /// assert_eq!(
+    ///     config.resolve_origin(Some("https://override.kibe.la"), Some("acme")).as_deref(),
+    ///     Some("https://override.kibe.la")
+    /// );
+    /// ```
     pub fn resolve_origin(
         &self,
         requested_origin: Option<&str>,

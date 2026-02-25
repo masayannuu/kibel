@@ -1,0 +1,91 @@
+name: quality-observe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-observe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.89.0
+
+      - name: Install quality observer tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-semver-checks,cargo-audit
+
+      - name: Observe nextest run
+        id: nextest
+        continue-on-error: true
+        run: cargo nextest run --workspace --all-targets
+
+      - name: Observe dependency advisories
+        id: deny
+        continue-on-error: true
+        run: |
+          LOG_FILE="$(mktemp)"
+          if cargo deny check advisories 2>&1 | tee "${LOG_FILE}"; then
+            exit 0
+          fi
+
+          if rg -q "unsupported CVSS version: 4\\.0" "${LOG_FILE}"; then
+            echo "cargo-deny cannot parse CVSS 4.0 advisory metadata; falling back to cargo audit"
+            cargo audit --deny warnings --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0384
+            exit 0
+          fi
+
+          exit 1
+
+      - name: Observe semver compatibility (kibel-client only)
+        id: semver
+        continue-on-error: true
+        run: |
+          BASE_REF="${{ github.base_ref }}"
+          if [ -z "${BASE_REF}" ]; then
+            BASE_REF="main"
+          fi
+
+          git fetch --no-tags origin "${BASE_REF}" || true
+
+          if ! git show-ref --verify --quiet "refs/remotes/origin/${BASE_REF}"; then
+            echo "baseline ref origin/${BASE_REF} is unavailable; skip semver check"
+            exit 0
+          fi
+
+          if ! git diff --name-only "origin/${BASE_REF}"...HEAD | rg -q '^crates/kibel-client/'; then
+            echo "kibel-client not changed; skip semver check"
+            exit 0
+          fi
+
+          cargo semver-checks check-release -p kibel-client --baseline-rev "origin/${BASE_REF}"
+
+      - name: Write observation summary
+        if: always()
+        run: |
+          {
+            echo "## quality-observe summary"
+            echo ""
+            echo "- nextest: ${{ steps.nextest.outcome }}"
+            echo "- cargo-deny(advisories): ${{ steps.deny.outcome }}"
+            echo "- semver-checks(kibel-client): ${{ steps.semver.outcome }}"
+            echo ""
+            echo "This workflow is non-blocking and intended for signal collection."
+          } >> "${GITHUB_STEP_SUMMARY}"

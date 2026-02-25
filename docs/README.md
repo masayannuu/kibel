@@ -1,7 +1,10 @@
 # kibel docs
 
 - `docs/implementation-policy.md`: 実装方針と品質基準
+- `docs/cli-interface.md`: 公式CLI I/F仕様（安定コントラクト）
+- `docs/agent-skills.md`: Agent向け公式SKILLパック
 - `docs/architecture.md`: CLI/Client の責務分離と全リソース設計
+- `docs/graphql-tooling-roadmap.md`: 2026ベストプラクティスに寄せる段階的設計計画
 - `docs/schema-lifecycle.md`: スキーマ版管理・更新・生成フロー
 - `docs/maintenance.md`: 維持運用・拡張時の手順
 - `../CONTRIBUTING.md`: OSS貢献フロー
