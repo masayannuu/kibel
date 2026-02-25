@@ -225,7 +225,18 @@ fn note_get_many_success_with_stub_fixture() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(payload["ok"], Value::Bool(true));
     assert_eq!(
+        payload["data"]["notes"]
+            .as_array()
+            .map(std::vec::Vec::len)
+            .unwrap_or_default(),
+        2
+    );
+    assert_eq!(
         payload["data"]["notes"][0]["id"],
+        Value::String("N1".to_string())
+    );
+    assert_eq!(
+        payload["data"]["notes"][1]["id"],
         Value::String("N1".to_string())
     );
 }
