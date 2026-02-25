@@ -27,6 +27,30 @@ fn run_kibel_json(args: &[&str], envs: &[(&str, String)]) -> (Output, Value) {
     (output, payload)
 }
 
+fn run_kibel_default(args: &[&str], envs: &[(&str, String)]) -> (Output, Value) {
+    let mut command = Command::new(assert_cmd::cargo::cargo_bin!("kibel"));
+    command.args(args);
+    for key in [
+        "KIBELA_ORIGIN",
+        "KIBELA_TEAM",
+        "KIBELA_ACCESS_TOKEN",
+        "KIBEL_TEST_GRAPHQL_RESPONSE",
+        "KIBEL_TEST_CREATE_NOTE_SCHEMA_RESPONSE",
+        "KIBEL_TEST_TRANSPORT_ERROR",
+        "KIBEL_TEST_CAPTURE_REQUEST_PATH",
+    ] {
+        command.env_remove(key);
+    }
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+
+    let output = command.output().expect("failed to run kibel");
+    let payload = serde_json::from_slice::<Value>(&output.stdout)
+        .expect("kibel should print JSON by default");
+    (output, payload)
+}
+
 fn unique_value(prefix: &str) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -209,6 +233,24 @@ fn note_get_success_with_stub_fixture() {
     assert_eq!(
         payload["data"]["meta"]["token_source"],
         Value::String("env".to_string())
+    );
+}
+
+#[test]
+fn json_is_default_without_flag() {
+    let (output, payload) = run_kibel_default(
+        &["note", "get", "--id", "N1"],
+        &base_env(
+            "http://fixture.local",
+            fixture_note("N1", "stub-title", "stub-content"),
+        ),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(payload["ok"], Value::Bool(true));
+    assert_eq!(
+        payload["data"]["note"]["id"],
+        Value::String("N1".to_string())
     );
 }
 

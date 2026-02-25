@@ -1,7 +1,7 @@
 ---
 name: kibel-cli-operator
 description: Use this skill when an agent needs broad operational coverage of the official kibel CLI, including safe GraphQL query execution.
-allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(jq:*),Bash(cat:*),Bash(bash:*)
+allowed-tools: Bash(kibel:*),Bash(rg:*),Bash(python3:*),Bash(cat:*),Bash(bash:*)
 ---
 
 # kibel CLI Operator
@@ -22,13 +22,34 @@ elif ! command -v "${KBIN}" >/dev/null 2>&1; then
   echo "kibel not found in PATH (or set KIBEL_BIN)" >&2
   exit 127
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found in PATH" >&2
+  exit 127
+fi
 
-AUTH_JSON="$("${KBIN}" --json auth status 2>/dev/null)" || {
+AUTH_JSON="$("${KBIN}" auth status 2>/dev/null)" || {
   echo "auth status command failed" >&2
   exit 3
 }
-echo "${AUTH_JSON}" | jq -e '.ok == true' >/dev/null || {
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"${AUTH_JSON}" || {
   echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data", {}).get("logged_in") is True else 1)' <<<"${AUTH_JSON}" || {
+  echo "auth is not ready; run auth login first" >&2
+  exit 3
+}
+
+SMOKE_JSON="$("${KBIN}" search note --query "test" --first 1 2>/dev/null)" || {
+  echo "search note smoke failed" >&2
+  exit 3
+}
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"${SMOKE_JSON}" || {
+  echo "search note smoke returned not ok" >&2
+  exit 3
+}
+python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d.get("data", {}).get("results"), list) else 1)' <<<"${SMOKE_JSON}" || {
+  echo "search note output shape mismatch: .data.results[] expected" >&2
   exit 3
 }
 "${KBIN}" --help
@@ -40,11 +61,11 @@ If auth is not ready:
 
 ```bash
 # interactive
-"${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
+"${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>"
 
 # non-interactive (CI/temporary, `--with-token` reads stdin)
 printf '%s' "${KIBELA_ACCESS_TOKEN}" | \
-  "${KBIN}" --json auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
+  "${KBIN}" auth login --origin "https://<tenant>.kibe.la" --team "<tenant>" --with-token
 ```
 
 Token issue page:
@@ -56,12 +77,19 @@ https://<tenant>.kibe.la/settings/access_tokens
 Tenant placeholder rule:
 
 - Kibela origin `https://<tenant>.kibe.la` の `<tenant>` を使う。
-- 例: `https://spikestudio.kibe.la` -> `team=spikestudio`
+- 例: `https://example.kibe.la` -> `team=example`
 
 Security note:
 
 - ローカル運用は interactive login を優先（keychain/config に保存）。
 - `KIBELA_ACCESS_TOKEN` / `--with-token` は CI・一時実行向け。常用しない。
+
+## Canonical JSON selectors
+
+- `search note`: `.data.results[]`
+- `search note` cursor: `.data.page_info.endCursor`
+- `search user`: `.data.users[]`
+- `auth status`: `.data.logged_in`, `.data.team`, `.data.origin`
 
 ## Command family guidance
 
@@ -81,7 +109,7 @@ Security note:
 ## GraphQL run policy
 
 - Query by default (`--allow-mutation` not used).
-- Keep `--json` enabled.
+- Default output is JSON. Use `--text` only when human-readable output is required.
 - Prefer query files for non-trivial queries.
 - For mutation requests, only execute when user explicitly requests and root field is allowlisted.
 
