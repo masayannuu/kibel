@@ -55,6 +55,9 @@ query EndpointIntrospection {
           ...TypeRef
         }
       }
+      inputFields {
+        name
+      }
       possibleTypes {
         name
       }
@@ -259,6 +262,7 @@ enum CreateNoteContractAction {
     Check(CreateNoteContractArgs),
     Write(CreateNoteContractArgs),
     RefreshSnapshot(CreateNoteRefreshArgs),
+    RefreshFromEndpoint(CreateNoteRefreshFromEndpointArgs),
 }
 
 #[derive(Subcommand)]
@@ -266,6 +270,7 @@ enum ResourceContractAction {
     Check(ResourceContractArgs),
     Write(ResourceContractArgs),
     RefreshEndpoint(EndpointRefreshArgs),
+    Diff(ResourceContractDiffArgs),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -312,6 +317,20 @@ struct CreateNoteRefreshArgs {
 }
 
 #[derive(Args, Clone)]
+struct CreateNoteRefreshFromEndpointArgs {
+    #[arg(
+        long,
+        default_value = "research/schema/resource_contracts.endpoint.snapshot.json"
+    )]
+    endpoint_snapshot: String,
+    #[arg(
+        long,
+        default_value = "research/schema/create_note_contract.snapshot.json"
+    )]
+    snapshot: String,
+}
+
+#[derive(Args, Clone)]
 struct ResourceContractArgs {
     #[arg(
         long,
@@ -330,6 +349,16 @@ struct ResourceContractArgs {
     generated: String,
     #[arg(long, value_enum, default_value_t = DocumentFallbackMode::Strict)]
     document_fallback_mode: DocumentFallbackMode,
+}
+
+#[derive(Args, Clone)]
+struct ResourceContractDiffArgs {
+    #[arg(long)]
+    base: String,
+    #[arg(long)]
+    target: String,
+    #[arg(long, default_value_t = false)]
+    fail_on_breaking: bool,
 }
 
 #[derive(Args, Clone)]
@@ -434,6 +463,9 @@ fn run(cli: Cli) -> Result<(), String> {
             CreateNoteContractAction::RefreshSnapshot(args) => {
                 run_create_note_contract_refresh_snapshot(&root, &args)
             }
+            CreateNoteContractAction::RefreshFromEndpoint(args) => {
+                run_create_note_contract_refresh_from_endpoint(&root, &args)
+            }
         },
         TopCommand::ResourceContract { action } => match action {
             ResourceContractAction::Check(args) => run_resource_contract_check(&root, &args),
@@ -441,6 +473,7 @@ fn run(cli: Cli) -> Result<(), String> {
             ResourceContractAction::RefreshEndpoint(args) => {
                 run_resource_contract_refresh_endpoint(&root, &args)
             }
+            ResourceContractAction::Diff(args) => run_resource_contract_diff(&root, &args),
         },
     }
 }
@@ -1370,6 +1403,21 @@ fn run_create_note_contract_refresh_snapshot(
     Ok(())
 }
 
+fn run_create_note_contract_refresh_from_endpoint(
+    root: &Path,
+    args: &CreateNoteRefreshFromEndpointArgs,
+) -> Result<(), String> {
+    let endpoint_snapshot_path = resolve_path(root, &args.endpoint_snapshot);
+    let endpoint_snapshot_payload = read_json(&endpoint_snapshot_path)?;
+    let snapshot_value =
+        build_create_note_snapshot_from_endpoint_snapshot(&endpoint_snapshot_payload)?;
+
+    let snapshot_path = resolve_path(root, &args.snapshot);
+    write_json_pretty(&snapshot_path, &snapshot_value)?;
+    println!("create-note contract refresh from endpoint snapshot: ok (written)");
+    Ok(())
+}
+
 fn build_create_note_snapshot_from_introspection(
     payload: &Value,
     origin: &str,
@@ -1395,6 +1443,143 @@ fn build_create_note_snapshot_from_introspection(
         "noteType.fields",
     )?;
 
+    validate_create_note_schema_fields(
+        &input_fields,
+        &payload_fields,
+        &note_projection_fields,
+        "introspection payload",
+    )?;
+    Ok(create_note_snapshot_value(
+        &input_fields,
+        &payload_fields,
+        &note_projection_fields,
+        origin,
+        &format!("live-introspection:{endpoint}"),
+        captured_at,
+    ))
+}
+
+fn build_create_note_schema_from_endpoint_introspection(
+    payload: &Value,
+) -> Result<CreateNoteSnapshot, String> {
+    let input_fields = collect_schema_type_member_names(
+        payload,
+        "CreateNoteInput",
+        "inputFields",
+        "endpoint introspection",
+    )?;
+    let payload_fields = collect_schema_type_member_names(
+        payload,
+        "CreateNotePayload",
+        "fields",
+        "endpoint introspection",
+    )?;
+    let note_projection_fields =
+        collect_schema_type_member_names(payload, "Note", "fields", "endpoint introspection")?;
+
+    validate_create_note_schema_fields(
+        &input_fields,
+        &payload_fields,
+        &note_projection_fields,
+        "endpoint introspection",
+    )?;
+
+    Ok(CreateNoteSnapshot {
+        input: input_fields,
+        payload: payload_fields,
+        note_projection: note_projection_fields,
+    })
+}
+
+fn build_create_note_snapshot_from_endpoint_snapshot(payload: &Value) -> Result<Value, String> {
+    let context = "endpoint snapshot";
+    let object = payload
+        .as_object()
+        .ok_or_else(|| format!("{context} must be an object"))?;
+    let create_note = object
+        .get("create_note_schema")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("{context} missing `create_note_schema`"))?;
+
+    let input_fields = normalize_string_list(
+        create_note
+            .get("input_fields")
+            .ok_or_else(|| format!("{context}.create_note_schema missing `input_fields`"))?,
+        &format!("{context}.create_note_schema.input_fields"),
+    )?;
+    let payload_fields = normalize_string_list(
+        create_note
+            .get("payload_fields")
+            .ok_or_else(|| format!("{context}.create_note_schema missing `payload_fields`"))?,
+        &format!("{context}.create_note_schema.payload_fields"),
+    )?;
+    let note_projection_fields = normalize_string_list(
+        create_note.get("note_projection_fields").ok_or_else(|| {
+            format!("{context}.create_note_schema missing `note_projection_fields`")
+        })?,
+        &format!("{context}.create_note_schema.note_projection_fields"),
+    )?;
+    validate_create_note_schema_fields(
+        &input_fields,
+        &payload_fields,
+        &note_projection_fields,
+        context,
+    )?;
+
+    let captured_at = object
+        .get("captured_at")
+        .map(value_to_string)
+        .unwrap_or_default();
+    let origin = object
+        .get("origin")
+        .map(value_to_string)
+        .unwrap_or_default();
+    let endpoint = object
+        .get("endpoint")
+        .map(value_to_string)
+        .unwrap_or_default();
+
+    Ok(create_note_snapshot_value(
+        &input_fields,
+        &payload_fields,
+        &note_projection_fields,
+        &origin,
+        &format!("endpoint-snapshot:{endpoint}"),
+        &captured_at,
+    ))
+}
+
+fn collect_schema_type_member_names(
+    payload: &Value,
+    type_name: &str,
+    member_key: &str,
+    context: &str,
+) -> Result<Vec<String>, String> {
+    let types = payload
+        .pointer("/data/__schema/types")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{context} missing /data/__schema/types array"))?;
+    let type_object = types
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|item| {
+            item.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.trim() == type_name)
+        })
+        .ok_or_else(|| format!("{context} missing type `{type_name}`"))?;
+    let members = type_object
+        .get(member_key)
+        .ok_or_else(|| format!("{context} type `{type_name}` missing `{member_key}`"))?;
+    collect_graphql_name_list(members, &format!("{type_name}.{member_key}"))
+}
+
+fn validate_create_note_schema_fields(
+    input_fields: &[String],
+    payload_fields: &[String],
+    note_projection_fields: &[String],
+    context: &str,
+) -> Result<(), String> {
     let input_set = input_fields
         .iter()
         .map(String::as_str)
@@ -1410,7 +1595,7 @@ fn build_create_note_snapshot_from_introspection(
         .collect::<Vec<_>>();
     if !missing_required_input.is_empty() {
         return Err(format!(
-            "missing required create-note input fields from introspection: {}",
+            "{context} missing required create-note input fields: {}",
             missing_required_input.join(", ")
         ));
     }
@@ -1421,27 +1606,37 @@ fn build_create_note_snapshot_from_introspection(
         .collect::<Vec<_>>();
     if !missing_required_payload.is_empty() {
         return Err(format!(
-            "missing required create-note payload fields from introspection: {}",
+            "{context} missing required create-note payload fields: {}",
             missing_required_payload.join(", ")
         ));
     }
     if !note_projection_fields.iter().any(|field| field == "id") {
-        return Err("noteType.fields must include id".to_string());
+        return Err(format!("{context} note projection must include `id`"));
     }
+    Ok(())
+}
 
-    Ok(json!({
+fn create_note_snapshot_value(
+    input_fields: &[String],
+    payload_fields: &[String],
+    note_projection_fields: &[String],
+    origin: &str,
+    artifact: &str,
+    captured_at: &str,
+) -> Value {
+    json!({
         "schema_contract_version": 1,
         "captured_at": captured_at,
         "source": {
             "origin": origin,
-            "artifact": format!("live-introspection:{endpoint}"),
+            "artifact": artifact,
         },
         "create_note_input_fields": input_fields,
         "create_note_payload_fields": payload_fields,
         "create_note_note_projection_fields": note_projection_fields,
         "required_input_fields": REQUIRED_CREATE_NOTE_INPUT_FIELDS,
         "required_payload_fields": REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS,
-    }))
+    })
 }
 
 fn build_endpoint_snapshot_from_introspection(
@@ -1455,6 +1650,7 @@ fn build_endpoint_snapshot_from_introspection(
     let query_fields = parse_graphql_fields(payload, "query")?;
     let mutation_fields = parse_graphql_fields(payload, "mutation")?;
     let type_map = parse_schema_types(payload)?;
+    let create_note_schema = build_create_note_schema_from_endpoint_introspection(payload)?;
 
     let mut resources = Vec::new();
     for definition in definitions {
@@ -1517,6 +1713,13 @@ fn build_endpoint_snapshot_from_introspection(
         "origin": origin,
         "endpoint": endpoint,
         "resource_count": definitions.len(),
+        "create_note_schema": {
+            "input_fields": create_note_schema.input,
+            "payload_fields": create_note_schema.payload,
+            "note_projection_fields": create_note_schema.note_projection,
+            "required_input_fields": REQUIRED_CREATE_NOTE_INPUT_FIELDS,
+            "required_payload_fields": REQUIRED_CREATE_NOTE_PAYLOAD_FIELDS,
+        },
         "resources": resources,
     }))
 }
@@ -1875,6 +2078,112 @@ fn parse_normalized_resource(item: &Value, context: &str) -> Result<NormalizedRe
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResourceContractDiffResult {
+    breaking: Vec<String>,
+    notes: Vec<String>,
+}
+
+fn graphql_root_field(graphql_file: &str) -> Option<&str> {
+    graphql_file
+        .rsplit('.')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn compute_resource_contract_diff(
+    base: &NormalizedSnapshot,
+    target: &NormalizedSnapshot,
+) -> ResourceContractDiffResult {
+    let base_by_name = base
+        .resources
+        .iter()
+        .map(|item| (item.name.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    let target_by_name = target
+        .resources
+        .iter()
+        .map(|item| (item.name.as_str(), item))
+        .collect::<HashMap<_, _>>();
+
+    let mut breaking = Vec::new();
+    let mut notes = Vec::new();
+
+    for base_item in &base.resources {
+        let Some(target_item) = target_by_name.get(base_item.name.as_str()) else {
+            breaking.push(format!(
+                "resource removed: `{}` ({})",
+                base_item.name, base_item.kind
+            ));
+            continue;
+        };
+
+        if base_item.kind != target_item.kind {
+            breaking.push(format!(
+                "resource kind changed: `{}` {} -> {}",
+                base_item.name, base_item.kind, target_item.kind
+            ));
+        }
+
+        let base_root = graphql_root_field(&base_item.graphql_file).unwrap_or("");
+        let target_root = graphql_root_field(&target_item.graphql_file).unwrap_or("");
+        if !base_root.is_empty() && !target_root.is_empty() && base_root != target_root {
+            breaking.push(format!(
+                "resource root field changed: `{}` {} -> {}",
+                base_item.name, base_root, target_root
+            ));
+        }
+
+        let base_required = base_item
+            .required_variables
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let target_required = target_item
+            .required_variables
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let removed_required = base_required
+            .difference(&target_required)
+            .copied()
+            .collect::<Vec<_>>();
+        if !removed_required.is_empty() {
+            breaking.push(format!(
+                "resource required variable(s) removed: `{}` {}",
+                base_item.name,
+                removed_required.join(", ")
+            ));
+        }
+
+        let added_required = target_required
+            .difference(&base_required)
+            .copied()
+            .collect::<Vec<_>>();
+        if !added_required.is_empty() {
+            notes.push(format!(
+                "resource required variable(s) added: `{}` {}",
+                base_item.name,
+                added_required.join(", ")
+            ));
+        }
+    }
+
+    for target_item in &target.resources {
+        if !base_by_name.contains_key(target_item.name.as_str()) {
+            notes.push(format!(
+                "resource added: `{}` ({})",
+                target_item.name, target_item.kind
+            ));
+        }
+    }
+
+    breaking.sort();
+    notes.sort();
+    ResourceContractDiffResult { breaking, notes }
+}
+
 fn load_resource_module_snapshot(path: &Path) -> Result<ResourceModuleSnapshot, String> {
     let payload = read_json(path)?;
     let object = payload
@@ -2161,6 +2470,46 @@ fn run_resource_contract_refresh_endpoint(
     Ok(())
 }
 
+fn load_normalized_snapshot_from_path(path: &Path) -> Result<NormalizedSnapshot, String> {
+    let payload = read_json(path)?;
+    normalize_resource_snapshot(&payload)
+}
+
+fn run_resource_contract_diff(root: &Path, args: &ResourceContractDiffArgs) -> Result<(), String> {
+    let base_path = resolve_path(root, &args.base);
+    let target_path = resolve_path(root, &args.target);
+    let base_snapshot = load_normalized_snapshot_from_path(&base_path)?;
+    let target_snapshot = load_normalized_snapshot_from_path(&target_path)?;
+    let diff = compute_resource_contract_diff(&base_snapshot, &target_snapshot);
+
+    if diff.breaking.is_empty() {
+        println!("resource contract diff: no breaking changes");
+    } else {
+        println!(
+            "resource contract diff: {} breaking change(s)",
+            diff.breaking.len()
+        );
+        for item in &diff.breaking {
+            println!("  - {item}");
+        }
+    }
+
+    if !diff.notes.is_empty() {
+        println!("resource contract diff notes:");
+        for item in &diff.notes {
+            println!("  - {item}");
+        }
+    }
+
+    if args.fail_on_breaking && !diff.breaking.is_empty() {
+        return Err(format!(
+            "resource contract diff detected {} breaking change(s)",
+            diff.breaking.len()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2307,7 +2656,49 @@ mod tests {
                                 }
                             }
                         ]
-                    }
+                    },
+                    "types": [
+                        {
+                            "name": "CreateNoteInput",
+                            "inputFields": [
+                                { "name": "title" },
+                                { "name": "content" },
+                                { "name": "groupIds" },
+                                { "name": "coediting" },
+                                { "name": "draft" }
+                            ]
+                        },
+                        {
+                            "name": "CreateNotePayload",
+                            "fields": [
+                                {
+                                    "name": "note",
+                                    "args": [],
+                                    "type": { "kind": "OBJECT", "name": "Note", "ofType": null }
+                                },
+                                {
+                                    "name": "clientMutationId",
+                                    "args": [],
+                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Note",
+                            "fields": [
+                                {
+                                    "name": "id",
+                                    "args": [],
+                                    "type": { "kind": "SCALAR", "name": "ID", "ofType": null }
+                                },
+                                {
+                                    "name": "title",
+                                    "args": [],
+                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                }
+                            ]
+                        }
+                    ]
                 }
             }
         });
@@ -2332,7 +2723,7 @@ mod tests {
             "https://example.kibe.la",
             "https://example.kibe.la/api/v1",
             "2026-02-24T00:00:00Z",
-            DocumentFallbackMode::Strict,
+            DocumentFallbackMode::Breakglass,
         )
         .expect("snapshot must build");
         let resources = snapshot
@@ -2513,6 +2904,140 @@ mod tests {
         assert!(
             error.contains("missing required create-note input fields"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn build_create_note_schema_from_endpoint_introspection_extracts_fields() {
+        let payload = json!({
+            "data": {
+                "__schema": {
+                    "types": [
+                        {
+                            "name": "CreateNoteInput",
+                            "inputFields": [
+                                { "name": "title" },
+                                { "name": "content" },
+                                { "name": "groupIds" },
+                                { "name": "coediting" },
+                                { "name": "draft" }
+                            ]
+                        },
+                        {
+                            "name": "CreateNotePayload",
+                            "fields": [
+                                { "name": "note" },
+                                { "name": "clientMutationId" }
+                            ]
+                        },
+                        {
+                            "name": "Note",
+                            "fields": [
+                                { "name": "id" },
+                                { "name": "title" }
+                            ]
+                        }
+                    ]
+                }
+            }
+        });
+
+        let schema = build_create_note_schema_from_endpoint_introspection(&payload)
+            .expect("schema should parse");
+        assert!(schema.input.iter().any(|field| field == "title"));
+        assert!(schema.payload.iter().any(|field| field == "note"));
+        assert!(schema.note_projection.iter().any(|field| field == "id"));
+    }
+
+    #[test]
+    fn build_create_note_snapshot_from_endpoint_snapshot_extracts_fields() {
+        let payload = json!({
+            "captured_at": "2026-02-25T00:00:00Z",
+            "origin": "https://example.kibe.la",
+            "endpoint": "https://example.kibe.la/api/v1",
+            "create_note_schema": {
+                "input_fields": ["title", "content", "groupIds", "coediting", "draft"],
+                "payload_fields": ["note", "clientMutationId"],
+                "note_projection_fields": ["id", "title"],
+            }
+        });
+        let snapshot = build_create_note_snapshot_from_endpoint_snapshot(&payload)
+            .expect("snapshot should build");
+        assert_eq!(
+            snapshot
+                .pointer("/create_note_payload_fields/0")
+                .and_then(Value::as_str),
+            Some("note")
+        );
+    }
+
+    #[test]
+    fn compute_resource_contract_diff_detects_breaking_changes() {
+        let base_payload = json!({
+            "schema_contract_version": 1,
+            "source": {
+                "mode": "endpoint_introspection_snapshot",
+                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+                "captured_at": "2026-02-23T00:00:00Z",
+                "origin": "https://example.kibe.la",
+                "endpoint": "https://example.kibe.la/api/v1",
+                "upstream_commit": "",
+            },
+            "resources": [{
+                "name": "searchNote",
+                "kind": "query",
+                "operation": "SearchNote",
+                "all_variables": ["query", "first"],
+                "required_variables": ["query"],
+                "graphql_file": "endpoint:query.search",
+                "client_method": "search_note",
+                "document": "query SearchNote($query: String!) { search(query: $query) { __typename } }"
+            }]
+        });
+        let target_payload = json!({
+            "schema_contract_version": 1,
+            "source": {
+                "mode": "endpoint_introspection_snapshot",
+                "endpoint_snapshot": "research/schema/resource_contracts.endpoint.snapshot.json",
+                "captured_at": "2026-02-24T00:00:00Z",
+                "origin": "https://example.kibe.la",
+                "endpoint": "https://example.kibe.la/api/v1",
+                "upstream_commit": "",
+            },
+            "resources": [{
+                "name": "searchNote",
+                "kind": "mutation",
+                "operation": "SearchNote",
+                "all_variables": ["query", "first"],
+                "required_variables": [],
+                "graphql_file": "endpoint:mutation.searchFolder",
+                "client_method": "search_note",
+                "document": "mutation SearchNote($query: String!) { searchFolder(query: $query) { __typename } }"
+            }]
+        });
+        let base = normalize_resource_snapshot(&base_payload).expect("base should parse");
+        let target = normalize_resource_snapshot(&target_payload).expect("target should parse");
+        let diff = compute_resource_contract_diff(&base, &target);
+        assert!(
+            diff.breaking
+                .iter()
+                .any(|item| item.contains("kind changed")),
+            "expected kind change in diff: {:?}",
+            diff.breaking
+        );
+        assert!(
+            diff.breaking
+                .iter()
+                .any(|item| item.contains("root field changed")),
+            "expected root field change in diff: {:?}",
+            diff.breaking
+        );
+        assert!(
+            diff.breaking
+                .iter()
+                .any(|item| item.contains("required variable(s) removed")),
+            "expected required variable removal in diff: {:?}",
+            diff.breaking
         );
     }
 }

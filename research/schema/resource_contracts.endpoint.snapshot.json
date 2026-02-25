@@ -273,5 +273,37 @@
       ],
       "document": "mutation UpdateNoteContent($input: UpdateNoteContentInput!) {\n  updateNoteContent(input: $input) {\n    note {\n      id\n      title\n      content\n    }\n  }\n}"
     }
-  ]
+  ],
+  "create_note_schema": {
+    "input_fields": [
+      "clientMutationId",
+      "title",
+      "content",
+      "draft",
+      "coediting",
+      "groupIds",
+      "folders",
+      "authorId",
+      "publishedAt"
+    ],
+    "payload_fields": [
+      "clientMutationId",
+      "note"
+    ],
+    "note_projection_fields": [
+      "id",
+      "title",
+      "content",
+      "url"
+    ],
+    "required_input_fields": [
+      "title",
+      "content",
+      "groupIds",
+      "coediting"
+    ],
+    "required_payload_fields": [
+      "note"
+    ]
+  }
 }

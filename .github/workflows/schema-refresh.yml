@@ -35,18 +35,28 @@ jobs:
           test -n "${KIBELA_ORIGIN}" || (echo "missing secret: KIBELA_ORIGIN" && exit 1)
           test -n "${KIBELA_ACCESS_TOKEN}" || (echo "missing secret: KIBELA_ACCESS_TOKEN" && exit 1)
 
+      - name: Preserve base resource contract snapshot
+        run: |
+          cp research/schema/resource_contracts.snapshot.json /tmp/resource_contracts.snapshot.base.json
+
       - name: Refresh snapshots from live endpoint
         env:
           KIBELA_ORIGIN: ${{ secrets.KIBELA_ORIGIN }}
           KIBELA_ACCESS_TOKEN: ${{ secrets.KIBELA_ACCESS_TOKEN }}
         run: |
-          cargo run -p kibel-tools -- create-note-contract refresh-snapshot --origin "${KIBELA_ORIGIN}"
           cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "${KIBELA_ORIGIN}" --document-fallback-mode strict
+          cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint
 
       - name: Regenerate contracts
         run: |
           cargo run -p kibel-tools -- create-note-contract write
           cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
+
+      - name: Diff resource contract compatibility (warn-only)
+        run: |
+          cargo run -p kibel-tools -- resource-contract diff \
+            --base /tmp/resource_contracts.snapshot.base.json \
+            --target research/schema/resource_contracts.snapshot.json
 
       - name: Verify refreshed contracts
         run: |

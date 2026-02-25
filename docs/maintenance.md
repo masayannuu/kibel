@@ -3,8 +3,8 @@
 ## Add a new resource
 
 1. endpoint introspection snapshot を更新し、ローカル契約へ反映する。
-   - `cargo run -p kibel-tools -- create-note-contract refresh-snapshot --origin "$KIBELA_ORIGIN"`
    - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN" --document-fallback-mode strict`
+   - `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 2. `kibel-client` に入力構造体・実行メソッドを追加。
 3. `kibel` に CLI サブコマンドを追加。
 4. `--json` の出力形を固定化。
@@ -26,7 +26,9 @@
   - `KIBELA_ORIGIN`
   - `KIBELA_ACCESS_TOKEN` (read-only を推奨)
 - Flow:
-  - live introspection refresh (`create-note`, endpoint)
+  - live introspection refresh (endpoint)
+  - create-note snapshot refresh (from endpoint snapshot)
+  - compatibility diff (warn-only)
   - contract write/check
   - quality checks
   - diff があれば PR 自動作成

@@ -13,7 +13,7 @@
 ## Update procedure
 
 1. endpoint introspection snapshot を更新する（live source から自動取得）。
-2. `createNote` 契約の変化がある場合は `create-note-contract` の snapshot/codegen を同期する。
+2. endpoint snapshot から `createNote` 契約 snapshot を同期する（単一キャプチャ源）。
 3. all-resource 契約の snapshot/codegen を同期する。
    - trusted operation document も同時に更新される（endpoint snapshot起点）。
    - 通常運用は strict mode（document fallback 無効）で実行する。
@@ -24,26 +24,31 @@
 
 - GitHub Actions `schema-refresh` workflow が定期実行される。
 - 実行内容:
-  - live endpoint から `create-note` snapshot refresh
   - live endpoint から endpoint introspection refresh
+  - endpoint snapshot から `create-note` snapshot refresh
   - contract codegen/write
+  - resource contract compatibility diff (warn-only)
   - contract checks + workspace checks
   - 差分があれば PR 作成
 
 ## Command checklist
 
 ```bash
-# refresh create-note snapshot from live GraphQL
-cargo run -p kibel-tools -- create-note-contract refresh-snapshot \
-  --origin "$KIBELA_ORIGIN"
-
 # refresh endpoint snapshot from live GraphQL
 cargo run -p kibel-tools -- resource-contract refresh-endpoint \
   --origin "$KIBELA_ORIGIN" \
   --document-fallback-mode strict
 
+# refresh create-note snapshot from endpoint snapshot
+cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint
+
 # refresh contract snapshot/module from committed endpoint snapshot
 cargo run -p kibel-tools -- resource-contract write --document-fallback-mode strict
+
+# compatibility diff (warn-only by default)
+cargo run -p kibel-tools -- resource-contract diff \
+  --base /tmp/base-resource-contracts.snapshot.json \
+  --target research/schema/resource_contracts.snapshot.json
 
 # deterministic checks
 cargo run -p kibel-tools -- create-note-contract check
