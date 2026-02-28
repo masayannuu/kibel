@@ -7,6 +7,8 @@
 
 # kibel
 
+Language: English | [Japanese](README.ja.md)
+
 [![CI](https://github.com/masayannuu/kibel/actions/workflows/ci.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/ci.yml)
 [![Release](https://github.com/masayannuu/kibel/actions/workflows/release.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -114,10 +116,10 @@ kibel note get-many --id N1 --id N2
 kibel graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
-`search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
-`search note --preset` / `--save-preset` で検索条件をローカル config に保存・再利用できます。
+`search note --mine` is dedicated to the current user's latest notes only (cannot be combined with other search filters).
+`search note --preset` / `--save-preset` stores and reuses search settings in local config.
 
-`graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
+`graphql run` mutations require `--allow-mutation`, and only trusted resource-contract allowlisted root fields are permitted (delete/member/org-setting roots are blocked by default).
 
 ## Official Agent Skills
 
@@ -267,7 +269,7 @@ All-resource contract:
 - contract diff (machine-readable): `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
 
 Notes:
-- trusted operation の `document` は endpoint introspection snapshot から自動生成されます。
+- trusted operation `document` entries are auto-generated from the endpoint introspection snapshot.
 
 ## Development Quality Gates
 
