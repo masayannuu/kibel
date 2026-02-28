@@ -24,6 +24,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
+      - name: Validate release tag/version alignment
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          WORKSPACE_VERSION="$(awk -F'\"' '/^version = \"/ { print $2; exit }' Cargo.toml)"
+
+          if [ -z "${WORKSPACE_VERSION}" ]; then
+            echo "failed to read workspace version from Cargo.toml"
+            exit 1
+          fi
+
+          if [ "${TAG_VERSION}" != "${WORKSPACE_VERSION}" ]; then
+            echo "release tag/version mismatch: tag=${GITHUB_REF_NAME}, workspace=${WORKSPACE_VERSION}"
+            exit 1
+          fi
+
       - name: Setup Rust
         run: |
           rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy

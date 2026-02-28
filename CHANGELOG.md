@@ -15,7 +15,8 @@ All notable changes to this project are documented in this file.
 
 - Documentation and plans were consolidated to endpoint-first Rust operations.
 - CI/release/schema-refresh quality gates now enforce `all-features` clippy/test, rustdoc warnings, and doctests.
-- Workspace version moved to `0.2.0` to reflect public `kibel-client` API expansion.
+- Workspace version bumped to `0.2.8` and intra-workspace dependency constraints were aligned.
+- Release workflow now fails fast when release tag and workspace package version diverge.
 
 ### Removed
 
