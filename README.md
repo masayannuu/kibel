@@ -7,47 +7,46 @@
 
 # kibel
 
-Language: English | [Japanese](README.ja.md)
+Language: 日本語 | [English](README.en.md)
 
 [![CI](https://github.com/masayannuu/kibel/actions/workflows/ci.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/ci.yml)
 [![Release](https://github.com/masayannuu/kibel/actions/workflows/release.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> Community-maintained **unofficial** CLI/client for Kibela Web API.
-> Not affiliated with or endorsed by Bit Journey, Inc.
+> Kibela Web API 用の **非公式** CLI / クライアント（コミュニティメンテナンス）。
+> Bit Journey, Inc. とは無関係で、公式の承認は受けていません。
 
-Rust CLI + client library for Kibela GraphQL.
-Primary audience: coding agents and automation workflows that need deterministic, script-friendly Kibela access.
+Kibela GraphQL 用の Rust CLI + クライアントライブラリ。
+主な利用者は、決定論的でスクリプトに適した Kibela アクセスを必要とするコーディングエージェントと自動化ワークフローです。
 
-## What This Repo Provides
+## このリポジトリが提供するもの
 
-This repository contains three Rust packages:
+本リポジトリは 3 つの Rust パッケージで構成されています。
 
-- `kibel`: CLI for Kibela operations (search/read/create/update) with machine-readable JSON output.
-- `kibel-client`: reusable Rust client library that powers the CLI and can be embedded in other apps.
-- `kibel-tools`: schema contract maintenance utilities (snapshot/check/write).
+- `kibel`: 検索/参照/作成/更新を行う CLI（機械可読 JSON 出力）
+- `kibel-client`: CLI の中核となる再利用可能な Rust クライアントライブラリ
+- `kibel-tools`: スキーマ契約のメンテナンス用ユーティリティ（snapshot/check/write）
 
-## Why It Exists
+## なぜ存在するのか
 
-Kibela operations are often needed in scripts, CI, and internal tooling.  
-`kibel` focuses on:
+Kibela 操作はスクリプト・CI・社内ツールで必要になることが多く、`kibel` は以下にフォーカスします。
 
-- predictable automation behavior (stable JSON envelope + error code mapping),
-- shared behavior between CLI and library,
-- deterministic schema drift detection with committed snapshots.
+- 予測可能な自動化挙動（安定した JSON エンベロープ + エラーコードのマッピング）
+- CLI とライブラリの共通実装
+- コミット済みスナップショットによるスキーマドリフト検知の決定論化
 
-## Official Interfaces
+## 公式インタフェース
 
-Treat the following as canonical for automation integrations:
+自動化連携では以下を正規の契約とみなしてください。
 
-- `docs/cli-interface.md`: official CLI/API contract (default JSON, errors, exit codes, safety boundary).
-- `docs/agent-skills.md`: official agent workflows for high-precision retrieval and RAG.
+- `docs/cli-interface.md`: 公式 CLI/API 契約（デフォルト JSON、エラー、終了コード、セーフティ境界）
+- `docs/agent-skills.md`: 高精度検索/RAG の公式エージェントワークフロー
 
-## Quick Start (CLI)
+## クイックスタート（CLI）
 
-### 1. Install (recommended: GitHub Release binary)
+### 1. インストール（推奨: GitHub Release バイナリ）
 
-Linux (`x86_64` / `aarch64`) example:
+Linux (`x86_64` / `aarch64`) 例:
 
 ```bash
 VERSION="vX.Y.Z"
@@ -69,28 +68,28 @@ sudo install -m 0755 kibel /usr/local/bin/kibel
 kibel --version
 ```
 
-### 2. Install via Homebrew
+### 2. Homebrew でインストール
 
 ```bash
 brew install masayannuu/tap/kibel
 ```
 
-Note:
-- Homebrew distribution is provided via `masayannuu/homebrew-tap`.
-- Public repo visibility is required for unauthenticated users to fetch release assets.
+補足:
+- Homebrew 配布は `masayannuu/homebrew-tap` で提供されています。
+- リリースアセットを未認証ユーザーが取得するには public リポジトリが必要です。
 
-### 3. Fallback install from source (Cargo)
+### 3. ソースからのフォールバックインストール（Cargo）
 
 ```bash
-# install from source checkout
+# ソースチェックアウトからインストール
 cargo install --path crates/kibel
 
-# or build locally
+# もしくはローカルビルド
 cargo build --release -p kibel
 ./target/release/kibel --help
 ```
 
-### 4. Set environment
+### 4. 環境変数の設定
 
 ```bash
 export KIBELA_ORIGIN="https://my-team.kibe.la"
@@ -101,7 +100,7 @@ export KIBELA_TENANT_ORIGIN="https://my-team.kibe.la"
 export KIBELA_ACCESS_TOKEN="<your-token>"
 ```
 
-### 5. Run commands
+### 5. コマンド実行
 
 ```bash
 kibel auth status
@@ -116,34 +115,34 @@ kibel note get-many --id N1 --id N2
 kibel graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
-`search note --mine` is dedicated to the current user's latest notes only (cannot be combined with other search filters).
-`search note --preset` / `--save-preset` stores and reuses search settings in local config.
+`search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
+`search note --preset` / `--save-preset` で検索条件をローカル config に保存・再利用できます。
 
-`graphql run` mutations require `--allow-mutation`, and only trusted resource-contract allowlisted root fields are permitted (delete/member/org-setting roots are blocked by default).
+`graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
 
-## Official Agent Skills
+## 公式 Agent Skills
 
-This repo ships official skills under `skills/`:
+本リポジトリは `skills/` 配下に公式スキルを同梱しています。
 
 - `skills/kibel-agentic-search`
 - `skills/kibel-agentic-rag`
 - `skills/kibel-cli-operator`
 
-Install (Codex):
+インストール（Codex）:
 
 ```bash
 ./scripts/install_kibel_skills.sh
 ```
 
-Recommended for reproducibility:
+再現性重視の場合:
 
 ```bash
 ./scripts/install_kibel_skills.sh --ref v0.2.6
 ```
 
-Then restart Codex.
+その後 Codex を再起動してください。
 
-Fallback (manual skill-installer):
+手動インストール（skill-installer のフォールバック）:
 
 ```bash
 python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
@@ -154,69 +153,69 @@ python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/insta
   skills/kibel-cli-operator
 ```
 
-For Claude Code, use the same `SKILL.md` files directly as execution playbooks.
-Skills are distribution-first: they assume `kibel` is installed in `PATH` (or override with `KIBEL_BIN`).
+Claude Code では同じ `SKILL.md` を実行プレイブックとして利用できます。
+スキルは配布前提で、`kibel` が `PATH` に入っていることを想定しています（必要なら `KIBEL_BIN` で上書き）。
 
-## Auth And Config Behavior
+## 認証と設定の挙動
 
-Token resolution order is fixed:
+トークン解決順序は固定です。
 
-1. `--with-token` (stdin)
-2. `KIBELA_ACCESS_TOKEN` (or `--token-env`)
-3. OS credential store
-4. config file (`~/.config/kibel/config.toml`)
+1. `--with-token`（stdin）
+2. `KIBELA_ACCESS_TOKEN`（または `--token-env`）
+3. OS クレデンシャルストア
+4. config file（`~/.config/kibel/config.toml`）
 
-Origin and team resolution:
+origin / team の解決順序:
 
-1. Team: `--team` (alias: `--tenant`) / `KIBELA_TEAM` (alias: `KIBELA_TENANT`) -> `config.default_team`
-2. Origin: `--origin` / `KIBELA_ORIGIN` (alias: `KIBELA_TENANT_ORIGIN`) -> team profile origin
+1. Team: `--team`（alias: `--tenant`） / `KIBELA_TEAM`（alias: `KIBELA_TENANT`） -> `config.default_team`
+2. Origin: `--origin` / `KIBELA_ORIGIN`（alias: `KIBELA_TENANT_ORIGIN`） -> team profile origin
 
-`auth login` notes:
+`auth login` の補足:
 
-- Missing fields are prompted interactively on TTY (origin/team/token).
-- Token storage is tenant-origin aware in keychain (`origin::<origin>::team::<team>` subject).
-- Config profile also stores token/origin so server environments can run without keychain.
-- Token settings URL shown in login result: `<origin>/settings/access_tokens` (example: `https://example.kibe.la/settings/access_tokens`)
+- TTY の場合、欠落フィールド（origin/team/token）を対話入力します。
+- トークンは keychain に tenant-origin aware で保存されます（`origin::<origin>::team::<team>`）。
+- config profile にも token/origin を保存するため、サーバー環境でも keychain なしで実行できます。
+- login 結果に token 発行 URL を表示します: `<origin>/settings/access_tokens`（例: `https://example.kibe.la/settings/access_tokens`）
 
-If origin cannot be resolved, commands fail with `INPUT_INVALID`.
+origin が解決できない場合は `INPUT_INVALID` で失敗します。
 
-## CLI Scope
+## CLI のスコープ
 
-Current command groups:
+現在のコマンドグループ:
 
 - `auth`, `config`
 - `search`, `group`, `folder`, `feed`, `comment`, `note`
-- `graphql` (ad-hoc execution with guardrails)
+- `graphql`（ガードレール付きの ad-hoc 実行）
 - `completion`, `version`
 
-Use `kibel --help` and `kibel <group> --help` for full options.
+詳細は `kibel --help` と `kibel <group> --help` を参照してください。
 
-## Supported vs Not Supported (Current)
+## サポート対象 / 非対象（現状）
 
-Supported:
+サポート対象:
 
-- automation-friendly operations: search/read/create/update around notes, comments, folders, and feeds.
-- `graphql run` for ad-hoc queries and bounded/safe mutations.
+- ノート/コメント/フォルダ/フィードの検索・参照・作成・更新に関する自動化向け操作
+- `graphql run` による ad-hoc query と、安全に制限された mutation
 
-Not supported (intentional):
+非対象（意図的）:
 
-- destructive/admin operations such as delete flows, member add/remove, organization/group setting rewrites, and permission policy rewrites.
-- any hidden bypass path for these operations.
+- delete 系、メンバー追加/削除、組織/グループ設定の変更、権限ポリシー変更などの破壊的/管理者操作
+- これらの操作への隠しバイパス経路
 
-`graphql run` safety boundary:
+`graphql run` のセーフティ境界:
 
-- mutation requires explicit `--allow-mutation`.
-- mutation root field must be in trusted resource-contract allowlist.
-- trusted query commands use GET + persisted-hash negotiation with safe POST fallback.
-- `graphql run` (untrusted lane) stays POST-only to avoid URL leakage of ad-hoc payloads.
-- no `--dangerous` override exists in current release.
+- mutation は明示的な `--allow-mutation` が必要
+- mutation root field は trusted resource-contract allowlist に含まれている必要がある
+- trusted query は persisted-hash GET を試行し、未対応時は安全に POST fallback
+- `graphql run`（untrusted lane）は URL への payload 漏洩を避けるため POST のみ
+- 現行リリースに `--dangerous` のような override は存在しない
 
-Create-note runtime introspection policy:
+create-note の runtime introspection ポリシー:
 
-- default is OFF in production path.
-- enable explicitly only when needed: `KIBEL_ENABLE_RUNTIME_INTROSPECTION=1`.
+- デフォルトは本番経路で OFF
+- 必要時のみ明示的に有効化: `KIBEL_ENABLE_RUNTIME_INTROSPECTION=1`
 
-## Library Usage (`kibel-client`)
+## ライブラリ利用（`kibel-client`）
 
 ```rust
 use kibel_client::{KibelClient, SearchNoteInput};
@@ -249,29 +248,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Schema Lifecycle
+## スキーマライフサイクル
 
-Create-note contract:
+create-note 契約:
 
 - snapshot: `schema/contracts/create_note_contract.snapshot.json`
-- refresh from endpoint snapshot: `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
+- endpoint snapshot からの refresh: `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
 - check: `cargo run -p kibel-tools -- create-note-contract check`
-- update generated module: `cargo run -p kibel-tools -- create-note-contract write`
+- 生成モジュールの更新: `cargo run -p kibel-tools -- create-note-contract write`
 
-All-resource contract:
+全リソース契約:
 
-- endpoint snapshot source: `schema/introspection/resource_contracts.endpoint.snapshot.json`
-- normalized snapshot: `schema/contracts/resource_contracts.snapshot.json`
-- refresh endpoint snapshot: `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN"`
+- endpoint snapshot ソース: `schema/introspection/resource_contracts.endpoint.snapshot.json`
+- 正規化 snapshot: `schema/contracts/resource_contracts.snapshot.json`
+- endpoint snapshot の refresh: `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN"`
 - check: `cargo run -p kibel-tools -- resource-contract check`
-- update generated module: `cargo run -p kibel-tools -- resource-contract write`
-- contract diff (blocking): `cargo run -p kibel-tools -- resource-contract diff --base <old> --target schema/contracts/resource_contracts.snapshot.json --fail-on-breaking`
-- contract diff (machine-readable): `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
+- 生成モジュールの更新: `cargo run -p kibel-tools -- resource-contract write`
+- contract diff（blocking）: `cargo run -p kibel-tools -- resource-contract diff --base <old> --target schema/contracts/resource_contracts.snapshot.json --fail-on-breaking`
+- contract diff（machine-readable）: `cargo run -p kibel-tools -- resource-contract diff --format json --base <old> --target schema/contracts/resource_contracts.snapshot.json`
 
-Notes:
-- trusted operation `document` entries are auto-generated from the endpoint introspection snapshot.
+補足:
+- trusted operation の `document` は endpoint introspection snapshot から自動生成されます。
 
-## Development Quality Gates
+## 開発品質ゲート
 
 ```bash
 cargo fmt --all --check
@@ -281,7 +280,7 @@ cargo test -p kibel-client --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-## Project Docs
+## プロジェクトドキュメント
 
 - `docs/implementation-policy.md`
 - `docs/cli-interface.md`
@@ -292,7 +291,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 - `docs/maintenance.md`
 - `skills/README.md`
 
-## OSS Metadata
+## OSS メタデータ
 
 - `LICENSE`
 - `CONTRIBUTING.md`
