@@ -79,9 +79,9 @@ Ad-hoc lane:
 
 ### `search user`
 
-- `search note` 結果の `author` を集約して user discovery を行う補助コマンド。
+- `search note` 結果の `author` を集約してユーザーを検索する補助コマンド。
 - `id`, `account`, `real_name`, `match_count` を返す。
-- `--group-id` / `--folder-id` で探索範囲を絞り込める。
+- `--group-id` / `--folder-id` で検索範囲を絞り込める。
 - JSON data shape:
   - `data.users`: user array
   - `data.page_info`: pagination object

@@ -2,21 +2,21 @@
 
 ## Add a new resource
 
-1. endpoint introspection snapshot を更新し、ローカル契約へ反映する。
+1. endpoint introspection snapshot を更新し、ローカル契約に反映する。
    - `cargo run -p kibel-tools -- resource-contract refresh-endpoint --origin "$KIBELA_ORIGIN"`
    - `cargo run -p kibel-tools -- create-note-contract refresh-from-endpoint`
-2. `kibel-client` に入力構造体・実行メソッドを追加。
-3. `kibel` に CLI サブコマンドを追加。
-4. デフォルトJSON出力の envelope 形を固定化（`--text` は人間向け表示専用）。
-5. unit test + stub E2E を追加。
-6. all-resource contract snapshot/codegen を同期。
+2. `kibel-client` に入力構造体と実行メソッドを追加する。
+3. `kibel` に CLI サブコマンドを追加する。
+4. デフォルト JSON 出力の envelope 形式を固定する（`--text` は人間向け表示専用）。
+5. unit テストと stub E2E を追加する。
+6. all-resource contract の snapshot / codegen を同期する。
    - `cargo run -p kibel-tools -- resource-contract write`
 
 ## Regression checklist
 
-- 既存 error code マッピングを壊していないか。
-- auth precedence を壊していないか。
-- token や機微情報が出力されていないか。
+- 既存の error code マッピングを壊していないか。
+- auth の優先順序を壊していないか。
+- token や機微情報が出力に含まれていないか。
 
 ## Scheduled schema refresh
 
@@ -34,8 +34,8 @@
 
 ## Release checklist
 
-1. `CHANGELOG.md` の Unreleased を更新する。
-2. 全チェックコマンドを実行して成功させる。
+1. `CHANGELOG.md` の Unreleased セクションを更新する。
+2. 全チェックコマンドを実行し、すべて成功することを確認する。
    - `cargo fmt --all --check`
    - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
    - `cargo test --workspace --all-features`
@@ -43,24 +43,24 @@
    - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
    - `cargo run -p kibel-tools -- create-note-contract check`
    - `cargo run -p kibel-tools -- resource-contract check`
-3. package 検証を実行する。
+3. パッケージの検証を実行する。
    - `cargo package --locked -p kibel-client`
 4. `README.md` と `docs/` を実装に合わせて更新する。
 5. `v*.*.*` タグを push して release workflow を実行する。
-6. GitHub Release に以下成果物が揃っていることを確認する。
+6. GitHub Release に以下の成果物が揃っていることを確認する。
    - `kibel-${VERSION}-linux-x86_64.tar.gz`
    - `kibel-${VERSION}-linux-aarch64.tar.gz`
    - `kibel-${VERSION}-darwin-x86_64.tar.gz`
    - `kibel-${VERSION}-darwin-aarch64.tar.gz`
    - 各 `*.sha256`
    - `kibel-${VERSION}-checksums.txt`
-7. ダウンロード後の検証を実施する。
+7. ダウンロードしたアセットを検証する。
    - `sha256sum -c kibel-${VERSION}-linux-x86_64.tar.gz.sha256`
    - `sha256sum -c kibel-${VERSION}-linux-aarch64.tar.gz.sha256`
 8. release workflow の provenance attestation ステップが成功していることを確認する。
-9. Homebrew tap sync を使う場合、`homebrew-tap` job が成功していることを確認する。
-10. crates.io 公開する場合は `kibel-client` を先に publish し、index反映後に `kibel` を publish する。
-11. `kibel` publish 前に dry-run を行う。
+9. Homebrew tap sync を使う場合は `homebrew-tap` job が成功していることを確認する。
+10. crates.io に公開する場合は `kibel-client` を先に publish し、index に反映されてから `kibel` を publish する。
+11. `kibel` の publish 前に dry-run を行う。
    - `cargo publish --dry-run -p kibel`
 
 ## Homebrew tap sync configuration

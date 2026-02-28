@@ -13,7 +13,7 @@
 
 ## Resource model
 
-本CLIは Kibela GraphQL endpoint から得た17リソース契約に対応する。
+本 CLI は Kibela GraphQL endpoint から得た 17 のリソース契約に対応する。
 
 - Query resources
   - `searchNote`, `searchFolder`
@@ -31,19 +31,19 @@
 
 ## Design principles
 
-- クエリ定義は Kibela GraphQL endpoint 契約に寄せる（引数名・フィールド名を揃える）。
-- デフォルト件数 (`first`) は既存CLI互換の既定値を使用する。
-- モデルは「必要十分」: CLIで利用するフィールドだけを厳選し、過剰な静的型を避ける。
-- 契約管理は endpoint snapshot 起点の単一路線:
-  - CI基準: endpoint introspection snapshot から作る snapshot/codegen
+- クエリ定義は Kibela GraphQL endpoint の契約に合わせる（引数名・フィールド名を揃える）。
+- デフォルト件数 (`first`) は既存 CLI 互換の既定値を使用する。
+- モデルは「必要十分」: CLI で利用するフィールドだけを厳選し、過剰な静的型は避ける。
+- 契約管理は endpoint snapshot を起点とする単一路線:
+  - CI 基準: endpoint introspection snapshot から作る snapshot / codegen
   - refresh: `kibel-tools resource-contract refresh-endpoint`
-- built-in 操作は generated trusted operation registry を経由して実行前検証する。
-- `graphql run` は trusted registry外の明示経路として、guardrail 適用後に実行する。
+- built-in 操作は generated trusted operation registry を経由して実行前に検証する。
+- `graphql run` は trusted registry 外の明示的な経路として、guardrail 適用後に実行する。
   - mutation は `--allow-mutation` が必須。
-  - mutation root field は trusted resource contract 由来 allowlist に含まれるものだけ許可（危険操作の既定拒否）。
+  - mutation root field は trusted resource contract 由来の許可リストに含まれるものだけ許可（危険な操作はデフォルトで拒否）。
 - GraphQL-over-HTTP transport:
   - `Accept: application/graphql-response+json, application/json;q=0.9` を送信する。
-  - trusted query は persisted-hash GET を試行し、未対応時は安全に POST fallback する。
+  - trusted query は persisted-hash GET を試行し、未対応時は POST にフォールバックする。
   - mutation と untrusted lane は POST を維持する。
-- createNote runtime introspection は default OFF（`KIBEL_ENABLE_RUNTIME_INTROSPECTION=1` のときのみ有効化）。
-- 仕様差異がある場合は endpoint snapshot refresh と codegen 更新を優先し、互換レイヤーは持たない。
+- createNote runtime introspection はデフォルト OFF（`KIBEL_ENABLE_RUNTIME_INTROSPECTION=1` のときのみ有効化）。
+- 仕様に差異がある場合は endpoint snapshot refresh と codegen 更新を優先し、互換レイヤーは持たない。

@@ -13,11 +13,11 @@ Language: 日本語 | [English](README.en.md)
 [![Release](https://github.com/masayannuu/kibel/actions/workflows/release.yml/badge.svg)](https://github.com/masayannuu/kibel/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> Kibela Web API 用の **非公式** CLI / クライアント（コミュニティメンテナンス）。
-> Bit Journey, Inc. とは無関係で、公式の承認は受けていません。
+> Kibela Web API 向けの**非公式** CLI / クライアントライブラリです。
+> 個人が開発・メンテナンスしており、Bit Journey, Inc. の公式プロダクトではありません。
 
 Kibela GraphQL 用の Rust CLI + クライアントライブラリ。
-主な利用者は、決定論的でスクリプトに適した Kibela アクセスを必要とするコーディングエージェントと自動化ワークフローです。
+コーディングエージェントや自動化ワークフローから、安定した出力でスクリプトしやすい Kibela アクセスを提供します。
 
 ## このリポジトリが提供するもの
 
@@ -25,19 +25,19 @@ Kibela GraphQL 用の Rust CLI + クライアントライブラリ。
 
 - `kibel`: 検索/参照/作成/更新を行う CLI（機械可読 JSON 出力）
 - `kibel-client`: CLI の中核となる再利用可能な Rust クライアントライブラリ
-- `kibel-tools`: スキーマ契約のメンテナンス用ユーティリティ（snapshot/check/write）
+- `kibel-tools`: スキーマ契約メンテナンス用のユーティリティ（snapshot/check/write）
 
-## なぜ存在するのか
+## モチベーション
 
-Kibela 操作はスクリプト・CI・社内ツールで必要になることが多く、`kibel` は以下にフォーカスします。
+Kibela の操作はスクリプトや CI、社内ツールで必要になることが多く、`kibel` は以下にフォーカスしています。
 
-- 予測可能な自動化挙動（安定した JSON エンベロープ + エラーコードのマッピング）
-- CLI とライブラリの共通実装
-- コミット済みスナップショットによるスキーマドリフト検知の決定論化
+- 安定した自動化挙動（JSON エンベロープとエラーコードの一貫したマッピング）
+- CLI とライブラリで実装を共有
+- コミット済みスナップショットによるスキーマ変更の確実な検知
 
 ## 公式インタフェース
 
-自動化連携では以下を正規の契約とみなしてください。
+自動化で連携する際は、以下を安定した仕様としてお使いください。
 
 - `docs/cli-interface.md`: 公式 CLI/API 契約（デフォルト JSON、エラー、終了コード、セーフティ境界）
 - `docs/agent-skills.md`: 高精度検索/RAG の公式エージェントワークフロー
@@ -75,8 +75,8 @@ brew install masayannuu/tap/kibel
 ```
 
 補足:
-- Homebrew 配布は `masayannuu/homebrew-tap` で提供されています。
-- リリースアセットを未認証ユーザーが取得するには public リポジトリが必要です。
+- Homebrew 配布は `masayannuu/homebrew-tap` 経由で提供しています。
+- リリースアセットの取得には public リポジトリが必要です。
 
 ### 3. ソースからのフォールバックインストール（Cargo）
 
@@ -115,10 +115,10 @@ kibel note get-many --id N1 --id N2
 kibel graphql run --query 'query Q($id: ID!) { note(id: $id) { id title } }' --variables '{"id":"N1"}'
 ```
 
-`search note --mine` は「現在ユーザーの最新ノート一覧」専用です（他の search フィルタとの併用は不可）。
+`search note --mine` は自分の最新ノートを取得する専用コマンドです（他の検索フィルタとは併用できません）。
 `search note --preset` / `--save-preset` で検索条件をローカル config に保存・再利用できます。
 
-`graphql run` の mutation は `--allow-mutation` が必要で、さらに trusted resource contract で許可された root field のみ実行できます（delete/member/org-setting 系は既定で拒否）。
+`graphql run` で mutation を実行するには `--allow-mutation` が必要です。実行できるのは trusted resource contract で許可された root field のみで、delete/member/org-setting 系はデフォルトでブロックされます。
 
 ## 公式 Agent Skills
 
@@ -154,11 +154,11 @@ python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/insta
 ```
 
 Claude Code では同じ `SKILL.md` を実行プレイブックとして利用できます。
-スキルは配布前提で、`kibel` が `PATH` に入っていることを想定しています（必要なら `KIBEL_BIN` で上書き）。
+スキルはリリース済みバイナリの利用を前提としており、`kibel` が `PATH` に入っていることを想定しています（必要に応じて `KIBEL_BIN` で上書き可能）。
 
 ## 認証と設定の挙動
 
-トークン解決順序は固定です。
+トークンの解決順序は以下の通りです（固定）。
 
 1. `--with-token`（stdin）
 2. `KIBELA_ACCESS_TOKEN`（または `--token-env`）
@@ -172,16 +172,16 @@ origin / team の解決順序:
 
 `auth login` の補足:
 
-- TTY の場合、欠落フィールド（origin/team/token）を対話入力します。
-- トークンは keychain に tenant-origin aware で保存されます（`origin::<origin>::team::<team>`）。
+- TTY 環境では、未入力のフィールド（origin/team/token）を対話的に入力できます。
+- トークンは keychain にテナント・origin ごとに保存されます（`origin::<origin>::team::<team>`）。
 - config profile にも token/origin を保存するため、サーバー環境でも keychain なしで実行できます。
-- login 結果に token 発行 URL を表示します: `<origin>/settings/access_tokens`（例: `https://example.kibe.la/settings/access_tokens`）
+- ログイン結果にトークン発行ページの URL を表示します: `<origin>/settings/access_tokens`（例: `https://example.kibe.la/settings/access_tokens`）
 
-origin が解決できない場合は `INPUT_INVALID` で失敗します。
+origin を解決できない場合は `INPUT_INVALID` エラーになります。
 
 ## CLI のスコープ
 
-現在のコマンドグループ:
+利用できるコマンドグループ:
 
 - `auth`, `config`
 - `search`, `group`, `folder`, `feed`, `comment`, `note`
@@ -190,30 +190,30 @@ origin が解決できない場合は `INPUT_INVALID` で失敗します。
 
 詳細は `kibel --help` と `kibel <group> --help` を参照してください。
 
-## サポート対象 / 非対象（現状）
+## できること・できないこと（現時点）
 
-サポート対象:
+できること:
 
-- ノート/コメント/フォルダ/フィードの検索・参照・作成・更新に関する自動化向け操作
-- `graphql run` による ad-hoc query と、安全に制限された mutation
+- ノート・コメント・フォルダ・フィードの検索・参照・作成・更新
+- `graphql run` による ad-hoc クエリと、安全に制限された mutation
 
-非対象（意図的）:
+意図的に対象外としているもの:
 
-- delete 系、メンバー追加/削除、組織/グループ設定の変更、権限ポリシー変更などの破壊的/管理者操作
-- これらの操作への隠しバイパス経路
+- delete 系、メンバー追加/削除、組織/グループ設定の変更、権限ポリシー変更などの破壊的・管理者操作
+- 上記の制限を回避する隠しオプション
 
 `graphql run` のセーフティ境界:
 
-- mutation は明示的な `--allow-mutation` が必要
-- mutation root field は trusted resource-contract allowlist に含まれている必要がある
-- trusted query は persisted-hash GET を試行し、未対応時は安全に POST fallback
-- `graphql run`（untrusted lane）は URL への payload 漏洩を避けるため POST のみ
-- 現行リリースに `--dangerous` のような override は存在しない
+- mutation には明示的な `--allow-mutation` が必要
+- mutation root field は trusted resource-contract の許可リストに含まれている必要がある
+- trusted query は persisted-hash GET を試行し、未対応時は POST にフォールバック
+- `graphql run`（untrusted lane）は URL への payload 漏洩を避けるため POST のみ使用
+- 現行リリースに `--dangerous` のようなオーバーライドは存在しない
 
-create-note の runtime introspection ポリシー:
+create-note の runtime introspection:
 
-- デフォルトは本番経路で OFF
-- 必要時のみ明示的に有効化: `KIBEL_ENABLE_RUNTIME_INTROSPECTION=1`
+- デフォルトは OFF
+- 必要な場合のみ明示的に有効化: `KIBEL_ENABLE_RUNTIME_INTROSPECTION=1`
 
 ## ライブラリ利用（`kibel-client`）
 

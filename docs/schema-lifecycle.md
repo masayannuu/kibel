@@ -12,11 +12,11 @@
 
 ## Update procedure
 
-1. endpoint introspection snapshot を更新する（live source から自動取得）。
-2. endpoint snapshot から `createNote` 契約 snapshot を同期する（単一キャプチャ源）。
-3. all-resource 契約の snapshot/codegen を同期する。
-   - trusted operation document も同時に更新される（endpoint snapshot起点）。
-4. unit/E2E を実行する。
+1. endpoint introspection snapshot を更新する（live endpoint から自動取得）。
+2. endpoint snapshot から `createNote` 契約 snapshot を同期する（単一のソース）。
+3. all-resource 契約の snapshot / codegen を同期する。
+   - trusted operation document も同時に更新される（endpoint snapshot 起点）。
+4. unit / E2E テストを実行する。
 5. CI 通過を確認してマージする。
 
 ## Scheduled refresh
@@ -67,7 +67,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 ## Drift policy
 
-- 生成物 stale は即失敗（手動修正禁止、必ず generator を使う）。
-- endpoint snapshot 更新差分はレビュー対象にする。
-- schema 互換性が崩れる場合は:
-  - 互換パスは持たず、契約差分を明示して本流を更新する
+- 生成物が古くなっていれば即座に失敗させる（手動修正は禁止、必ず generator 経由で更新する）。
+- endpoint snapshot の更新差分はレビュー対象とする。
+- schema の互換性が崩れた場合:
+  - 互換パスは設けず、差分を明示したうえで本流を直接更新する
